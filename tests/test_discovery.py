@@ -107,3 +107,17 @@ def test_graph_links_ads_sharing_entities():
     G = graph.build_graph(recs)
     assert G.has_edge("A", "B"), "comparten 'logo telcel' pese a escribirse distinto"
     assert G.nodes["marca:logo telcel"]["kind"] == "marca"
+
+
+# --- guardia de calidad del batch -------------------------------------------
+
+def test_looks_degenerate_flags_loops_and_bad_json():
+    from discovery import understand
+
+    assert understand.looks_degenerate({"_raw": "texto no json"})
+    assert understand.looks_degenerate({"_error": "boom"})
+    assert understand.looks_degenerate({"marca_elementos": ["Telcel", "Telcel", "Telcel"]})
+    assert understand.looks_degenerate({"objetos": [f"o{i % 2}" for i in range(50)]})
+    assert not understand.looks_degenerate(
+        {"objetos": ["globo"], "temas": ["viaje"], "marca_elementos": ["Telcel", "logo"]}
+    )

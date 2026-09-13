@@ -62,6 +62,10 @@ def extract_frames(video_path: str | Path, n: int = 8, max_dim: int = 448) -> Li
     from moviepy import VideoFileClip
     from PIL import Image
 
+    # Dir único por llamada: si no, en un batch los frames de un anuncio
+    # sobrescriben los del anterior (mismo nombre) y todas las conversaciones
+    # acaban leyendo los frames del último anuncio.
+    out_dir = Path(tempfile.mkdtemp(prefix="qwenframes_"))
     clip = VideoFileClip(str(video_path))
     try:
         dur = float(clip.duration or 0.0)
@@ -72,7 +76,7 @@ def extract_frames(video_path: str | Path, n: int = 8, max_dim: int = 448) -> Li
             img = Image.fromarray(frame.astype("uint8"))
             # redimensionar (lado mayor <= max_dim) para acotar el coste de tokens del VLM
             img.thumbnail((max_dim, max_dim), Image.BILINEAR)
-            p = Path(tempfile.gettempdir()) / f"qwenframe_{os.getpid()}_{i}.png"
+            p = out_dir / f"frame_{i:03d}.png"
             img.save(p)
             paths.append(str(p))
     finally:
@@ -90,19 +94,32 @@ def _parse_json(raw: str) -> dict:
         return {"_raw": raw}
 
 
-def understand(
-    video_path: str | Path,
-    n_frames: int = 8,
-    model_id: str = MODEL_ID,
-    max_new_tokens: int = 768,
-) -> dict:
-    """Análisis estructurado del contenido del anuncio (dict JSON)."""
-    import torch
-    from qwen_vl_utils import process_vision_info
+_MAX_LIST = 40
 
-    model, processor = _load(model_id)
-    frames = extract_frames(video_path, n=n_frames)
-    messages = [
+
+def looks_degenerate(res: dict) -> bool:
+    """Heurística de respuesta degenerada: JSON no parseado o listas con bucles.
+
+    El batch cambia la trayectoria de la decodificación greedy; en un caso se
+    observó una lista de marca repitiendo elementos. Detectarlo permite reintentar
+    ese anuncio solo (batch=1) en vez de guardar una respuesta degradada.
+    """
+    if not isinstance(res, dict) or "_raw" in res or "_error" in res:
+        return True
+    for key in ("objetos", "personajes", "temas", "marca_elementos"):
+        items = res.get(key)
+        if not isinstance(items, list):
+            continue
+        if len(items) > _MAX_LIST:
+            return True
+        norm = [str(i).strip().lower() for i in items if str(i).strip()]
+        if norm and 1 - len(set(norm)) / len(norm) > 0.3:
+            return True
+    return False
+
+
+def _conversation(frames: List[str]) -> list:
+    return [
         {
             "role": "user",
             "content": [
@@ -111,24 +128,112 @@ def understand(
             ],
         }
     ]
-    text = processor.apply_chat_template(
-        messages, tokenize=False, add_generation_prompt=True
-    )
-    image_inputs, video_inputs = process_vision_info(messages)
-    inputs = processor(
-        text=[text],
-        images=image_inputs,
-        videos=video_inputs,
-        padding=True,
-        return_tensors="pt",
-    ).to(model.device)
-    with torch.inference_mode():
-        out = model.generate(**inputs, max_new_tokens=max_new_tokens, do_sample=False)
-    gen = out[:, inputs.input_ids.shape[1]:]
-    raw = processor.batch_decode(gen, skip_special_tokens=True)[0]
-    for p in frames:
+
+
+def _cleanup(frames_per_ad: List[List[str]]) -> None:
+    for frames in frames_per_ad:
+        for p in frames:
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
+        if frames:
+            try:
+                Path(frames[0]).parent.rmdir()  # dir temporal único por llamada
+            except OSError:
+                pass
+
+
+def _run_batch(model, processor, paths: List, n_frames: int, max_new_tokens: int) -> List[dict]:
+    """Un solo forward para varios anuncios (requiere padding_side='left')."""
+    import torch
+    from qwen_vl_utils import process_vision_info
+
+    frames_per_ad = [extract_frames(p, n=n_frames) for p in paths]
+    try:
+        conversations = [_conversation(fr) for fr in frames_per_ad]
+        texts = [
+            processor.apply_chat_template(c, tokenize=False, add_generation_prompt=True)
+            for c in conversations
+        ]
+        image_inputs, video_inputs = process_vision_info(conversations)
+        inputs = processor(
+            text=texts,
+            images=image_inputs,
+            videos=video_inputs,
+            padding=True,
+            return_tensors="pt",
+        ).to(model.device)
+        with torch.inference_mode():
+            out = model.generate(**inputs, max_new_tokens=max_new_tokens, do_sample=False)
+        gen = out[:, inputs.input_ids.shape[1]:]
+        raws = processor.batch_decode(gen, skip_special_tokens=True)
+    finally:
+        _cleanup(frames_per_ad)
+    return [_parse_json(r) for r in raws]
+
+
+def understand_batch(
+    video_paths: List,
+    n_frames: int = 8,
+    model_id: str = MODEL_ID,
+    max_new_tokens: int = 768,
+    batch_size: int = 2,
+) -> List[dict]:
+    """Analiza N anuncios con **batch adaptativo a la VRAM**.
+
+    Procesa en trozos de ``batch_size``; ante un OOM reduce el trozo a la mitad y
+    reintenta (hasta 1). Así un batch agresivo degrada en vez de fallar la fase.
+    """
+    if not video_paths:
+        return []
+    model, processor = _load(model_id)
+    # En generación batcheada el padding debe ser por la IZQUIERDA: con padding a la
+    # derecha las secuencias generadas quedan desalineadas respecto a
+    # `input_ids.shape[1]` y se mezclan las respuestas entre anuncios.
+    processor.tokenizer.padding_side = "left"
+
+    results: List[dict] = []
+    i = 0
+    bs = max(1, batch_size)
+    while i < len(video_paths):
+        chunk = video_paths[i:i + bs]
         try:
-            os.unlink(p)
-        except OSError:
-            pass
-    return _parse_json(raw)
+            outs = _run_batch(model, processor, chunk, n_frames, max_new_tokens)
+        except Exception as exc:  # noqa: BLE001 - OOM u otro -> reducir y reintentar
+            from discovery.gpu import free_gpu
+
+            free_gpu()
+            if bs > 1:
+                bs = max(1, bs // 2)
+                print(f"      [understand] batch reducido a {bs} ({type(exc).__name__})")
+                continue  # reintenta el MISMO trozo con batch menor
+            results.append({"_error": f"{type(exc).__name__}: {exc}"})
+            i += 1
+            continue
+        # Guardia de calidad: el batch puede degenerar en algún anuncio -> reintento solo
+        bad = [j for j, o in enumerate(outs) if bs > 1 and looks_degenerate(o)]
+        if bad:
+            print(f"      [understand] {len(bad)} respuesta(s) degenerada(s) en batch={bs}; reintento individual")
+            for j in bad:
+                try:
+                    outs[j] = _run_batch(model, processor, [chunk[j]], n_frames, max_new_tokens)[0]
+                except Exception as exc:  # noqa: BLE001
+                    outs[j] = {"_error": f"{type(exc).__name__}: {exc}"}
+        results.extend(outs)
+        i += len(chunk)
+    return results
+
+
+def understand(
+    video_path: str | Path,
+    n_frames: int = 8,
+    model_id: str = MODEL_ID,
+    max_new_tokens: int = 768,
+) -> dict:
+    """Análisis estructurado de un anuncio (dict JSON). Envuelve ``understand_batch``."""
+    return understand_batch(
+        [video_path], n_frames=n_frames, model_id=model_id,
+        max_new_tokens=max_new_tokens, batch_size=1,
+    )[0]
+

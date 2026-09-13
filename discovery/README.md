@@ -56,9 +56,9 @@ Aplica la skill `centauro-gpu-inference` (num_workers=0, una inferencia a la vez
 .venv/Scripts/python.exe -m discovery.pipeline --prune-cache 30
 ```
 
-Flags: `--workers N` (descargas en paralelo, def. 4), `--frames N` (def. 12),
-`--qwen-model`, `--whisper-model`, `--language`, `--no-transcribe`, `--no-understand`,
-`--neural`, `--no-cache`.
+Flags: `--workers N` (descargas en paralelo, def. 4), `--vlm-batch N` (anuncios por
+forward del VLM, def. 2), `--frames N` (def. 12), `--qwen-model`, `--whisper-model`,
+`--language`, `--no-transcribe`, `--no-understand`, `--neural`, `--no-cache`.
 
 Mover la caché de modelos a otro disco (evita llenar C:):
 ```bash
@@ -95,12 +95,44 @@ set CENTAURO_HF_HOME=D:\hf-cache
 | `gpu.py` | `free_gpu()`, `vram_report()` |
 | `pipeline.py` | orquestación por fases + CLI + métricas s/anuncio |
 
+## Batch del VLM (fase `understand`)
+
+Varios anuncios por forward (`--vlm-batch`, def. 2) amortiza el coste del VLM. Dos
+salvaguardas obligatorias, ambas verificadas:
+
+1. **Padding a la izquierda.** En generación batcheada el padding debe ser por la
+   izquierda, o las secuencias generadas se desalinean respecto a
+   `input_ids.shape[1]` y se mezclan las respuestas. `understand_batch` lo fija.
+2. **Guardia anti-degeneración + reintento individual.** El batch cambia la
+   trayectoria de la decodificación greedy y en algún anuncio degenera (p. ej. una
+   lista repite elementos). `looks_degenerate()` lo detecta y ese anuncio se recalcula
+   con `batch=1` en vez de guardar una respuesta degradada.
+3. **Adaptativo a VRAM:** ante OOM reduce el trozo a la mitad y reintenta (hasta 1).
+
+Medido (7B, 12 frames, 3 anuncios, mismo proceso):
+
+| Config | Total | s/anuncio | vs secuencial |
+|---|---|---|---|
+| secuencial (3×1) | 57.7 s | 19.2 | — |
+| `--vlm-batch 3` (run 1) | 22.5 s | **7.5** | x2.6 |
+| `--vlm-batch 3` (run 2) | 36.2 s | **12.1** | x1.6 |
+
+En ambas corridas **3/3 respuestas idénticas** a la inferencia individual. La guardia
+disparó 1 vez (anuncio `BsMrRFH390k`, un montaje antiguo propenso a bucle): el coste del
+fallback es un forward extra, que es lo que separa x2.6 de x1.6.
+
+> **Nota: TRIBE no se batchea.** El coste de la fase `neural` lo domina la codificación
+> de video V-JEPA (~1.8 s/frame-batch), no el forward de TRIBE (~1–2 s). Batchear
+> anuncios exigiría fusionar sus *events* en un solo DataFrame, con atribución frágil
+> de los segmentos. La palanca correcta ahí es **cachear features de V-JEPA**, que ya
+> está activo.
+
 ## Rendimiento medido (RTX 4090, esta máquina)
 
 | Etapa | Coste | Nota |
 |---|---|---|
 | transcribe | ~14.5 s/anuncio | Whisper residente (antes: recarga por anuncio) |
-| understand (7B, 12 frames) | ~19.5 s/anuncio | antes ~600 s/anuncio sin cap de frames ni residencia |
+| understand (7B, 12 frames) | ~19.2 s/anuncio secuencial · **7.5–12.1 s/anuncio con `--vlm-batch 3`** (x1.6–2.6) | antes ~600 s/anuncio sin cap de frames ni residencia |
 | neural (TRIBE) | ~176 s/anuncio en frío | **dominado por V-JEPA**; 2 s si las features están cacheadas |
 | resume desde store | ~0.1 s | corrida completa ya procesada |
 | cache hit | ~0.00 s/anuncio | ni carga el modelo |

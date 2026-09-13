@@ -155,7 +155,7 @@ proyecciones de §5 donde difieran.
 | **1. Residencia + fases** | ✅ | `pipeline.py` reescrito a fases de modelo; `neural.py` (TRIBE residente); `transcribe.unload()`, `understand.unload()`; `gpu.py` |
 | **2. Caché + idempotencia** | ✅ | `cache.py` (content-addressed `sha256(video‖etapa‖params)`, `stats()`, `prune()`); resume por defecto; `--no-cache` |
 | **3. Store + grafo** | ✅ | `store.py` (SQLite anuncios + entidades + `top_entities()`); `entities.py` (canonicalización/dedup); `graph.py` usa entidades canónicas |
-| **4. Solapamiento CPU/GPU** | ⚠️ parcial | `fetch.download_many()` en paralelo (workers=4). **Falta** batch real en Qwen/TRIBE (riesgo de VRAM; no implementado) |
+| **4. Solapamiento CPU/GPU** | ✅ | `fetch.download_many()` en paralelo (workers) + **batch adaptativo del VLM** (`understand_batch`, `--vlm-batch`) con guardia anti-degeneración y fallback a `batch=1`. El batch de **TRIBE no aplica** (ver nota) |
 | **5. Disco** | ⚠️ parcial | `CENTAURO_HF_HOME` → `HF_HOME`; `--prune-cache N`. **Falta** alerta automática de disco |
 
 ### Costos medidos vs. antes
@@ -176,6 +176,19 @@ Pruebas de verificación ejecutadas:
 - Fase neural: TRIBE cargado **una vez** para 2 anuncios → 352.5 s (176 s/ad).
 - Grafo: 33 nodos / 39 aristas, **3 aristas anuncio↔anuncio** por entidades canónicas
   (`marca:telcel`, `obj:telefono`, `tema:tecnologia`), `red_dominante=Vis` en 2 anuncios.
+- **Batch del VLM** (7B, 12 frames, 3 anuncios, mismo proceso): secuencial 19.2 s/ad vs
+  `--vlm-batch 3` **7.5–12.1 s/ad (x1.6–2.6)**, con **3/3 respuestas idénticas** a la
+  inferencia individual. La guardia disparó 1 vez por corrida (fallback = 1 forward extra).
+
+### Bug encontrado y corregido durante la implementación
+
+`extract_frames` nombraba los PNG `qwenframe_{pid}_{i}.png` **sin id del anuncio**: al
+batchear, los frames de cada anuncio **sobrescribían** los del anterior y todas las
+conversaciones acababan leyendo los frames del **último** anuncio (respuestas duplicadas).
+Corregido con un **directorio temporal único por llamada**. Es exactamente el tipo de bug
+que a escala habría producido análisis silenciosamente erróneos.
+Se añadió además `looks_degenerate()` + reintento individual, porque el batch puede
+degenerar en un anuncio concreto (bucle en la decodificación greedy).
 
 ### Correcciones a las proyecciones (§5)
 
@@ -187,9 +200,12 @@ Pruebas de verificación ejecutadas:
 
 ### Pendiente para el siguiente salto
 
-1. **Batch real** en Qwen/TRIBE (Fase 4) con batch adaptativo a VRAM.
-2. **Dedup semántico** de entidades (embeddings) — hoy solo canonicaliza strings, no fusiona
+1. **Dedup semántico** de entidades (embeddings) — hoy solo canonicaliza strings, no fusiona
    "persona con teléfono" ≈ "persona usando móvil".
-3. **Alerta de disco** automática (el llenado de C: ya rompió una corrida).
-4. Mover el corpus al store definitivo (SQLite → Postgres) al pasar a servicio.
+2. **Alerta de disco** automática (el llenado de C: ya rompió una corrida).
+3. Mover el corpus al store definitivo (SQLite → Postgres) al pasar a servicio.
+4. **Batch de TRIBE: descartado como palanca.** El coste lo domina la codificación V-JEPA
+   (~1.8 s/frame-batch; un anuncio de 60 s ≈ 4 min) frente a ~1–2 s del forward de TRIBE.
+   Fusionar los *events* de varios anuncios en un solo DataFrame atribuiría mal los
+   segmentos. La vía correcta es **cachear features de V-JEPA** (ya activo).
 

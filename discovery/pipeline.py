@@ -93,7 +93,7 @@ def phase_fetch(con, urls: List[str], workers: int) -> List[dict]:
 # Fase 1 — transcripción (Whisper residente)
 # ---------------------------------------------------------------------------
 def phase_transcribe(con, ads: List[dict], model: str, language: str, m: Metrics, use_cache: bool) -> None:
-    pend = [a for a in ads if not a.get("transcript")]
+    pend = [a for a in ads if not use_cache or not a.get("transcript")]
     if not pend:
         print("[transcribe] ya completo (resume)")
         return
@@ -120,27 +120,55 @@ def phase_transcribe(con, ads: List[dict], model: str, language: str, m: Metrics
 # ---------------------------------------------------------------------------
 # Fase 2 — comprensión (Qwen residente)
 # ---------------------------------------------------------------------------
-def phase_understand(con, ads: List[dict], model_id: str, frames: int, m: Metrics, use_cache: bool) -> None:
-    pend = [a for a in ads if not a.get("understanding")]
+def phase_understand(
+    con, ads: List[dict], model_id: str, frames: int, m: Metrics, use_cache: bool, batch_size: int
+) -> None:
+    # con --no-cache (use_cache=False) se ignora también el resume del store
+    pend = [a for a in ads if not use_cache or not a.get("understanding")]
     if not pend:
         print("[understand] ya completo (resume)")
         return
-    print(f"[understand] {len(pend)} anuncios ({model_id}, {frames} frames, residente)...")
-    from discovery import understand
 
+    # 1) resolver desde caché (barato, sin GPU)
+    todo = []
     for a in pend:
-        t0 = time.time()
         key = cache.content_key(a["video_path"], "understand", f"{model_id}|frames={frames}")
         cached = None if not use_cache else cache.get("understand", key)
         if cached is not None:
             a["understanding"] = cached
-            m.add("understand", a["id"], time.time() - t0, True)
             _upsert(con, a)
+            m.add("understand", a["id"], 0.0, True)
+        else:
+            todo.append((a, key))
+
+    if not todo:
+        print(f"[understand] {len(pend)} desde caché (resume)")
+        return
+
+    print(f"[understand] {len(todo)} anuncios ({model_id}, {frames} frames, batch={batch_size})...")
+    from discovery import understand
+
+    t0 = time.time()
+    results = understand.understand_batch(
+        [a["video_path"] for a, _ in todo],
+        n_frames=frames,
+        model_id=model_id,
+        batch_size=batch_size,
+    )
+    total = time.time() - t0
+    per = total / max(len(todo), 1)
+    ok = 0
+    for (a, key), res in zip(todo, results):
+        if not isinstance(res, dict) or "_error" in res:
+            err = res.get("_error") if isinstance(res, dict) else res
+            print(f"      [understand] {a['id']} FALLO: {err}")
             continue
-        a["understanding"] = understand.understand(a["video_path"], n_frames=frames, model_id=model_id)
-        cache.put("understand", key, a["understanding"])
+        a["understanding"] = res
+        cache.put("understand", key, res)
         _upsert(con, a)
-        m.add("understand", a["id"], time.time() - t0, False)
+        m.add("understand", a["id"], per, False)
+        ok += 1
+    print(f"      [understand] {ok}/{len(todo)} en {total:.1f}s ({per:.1f}s/anuncio amortizado)")
     understand.unload()
     print("      [understand] modelo descargado")
 
@@ -149,7 +177,7 @@ def phase_understand(con, ads: List[dict], model_id: str, frames: int, m: Metric
 # Fase 3 — perfil neural (TRIBE residente)
 # ---------------------------------------------------------------------------
 def phase_neural(con, ads: List[dict], m: Metrics, use_cache: bool) -> None:
-    pend = [a for a in ads if not a.get("neural")]
+    pend = [a for a in ads if not use_cache or not a.get("neural")]
     if not pend:
         print("[neural] ya completo (resume)")
         return
@@ -226,7 +254,7 @@ def run(args: argparse.Namespace) -> int:
     if not args.no_transcribe:
         phase_transcribe(con, ads, args.whisper_model, args.language, m, not args.no_cache)
     if not args.no_understand:
-        phase_understand(con, ads, args.qwen_model, args.frames, m, not args.no_cache)
+        phase_understand(con, ads, args.qwen_model, args.frames, m, not args.no_cache, args.vlm_batch)
     if args.neural:
         phase_neural(con, ads, m, not args.no_cache)
 
@@ -245,6 +273,8 @@ def main() -> int:
     src.add_argument("--n", type=int, default=8, help="nº de resultados de search/channel")
     p.add_argument("--workers", type=int, default=4, help="descargas en paralelo")
     p.add_argument("--frames", type=int, default=12, help="frames por anuncio para el VLM")
+    p.add_argument("--vlm-batch", type=int, default=2,
+                   help="anuncios por forward del VLM (adaptativo: baja solo si hay OOM)")
     p.add_argument("--qwen-model", default="Qwen/Qwen2.5-VL-7B-Instruct")
     p.add_argument("--whisper-model", default="openai/whisper-small")
     p.add_argument("--language", default="spanish", help="idioma de transcripción ('' = auto)")
