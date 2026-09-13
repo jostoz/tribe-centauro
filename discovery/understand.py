@@ -50,6 +50,14 @@ def _load(model_id: str = MODEL_ID):
     return model, processor
 
 
+def unload() -> None:
+    """Suelta el VLM y libera VRAM (fin de la fase de comprensión)."""
+    _load.cache_clear()
+    from discovery.gpu import free_gpu
+
+    free_gpu()
+
+
 def extract_frames(video_path: str | Path, n: int = 8, max_dim: int = 448) -> List[str]:
     from moviepy import VideoFileClip
     from PIL import Image

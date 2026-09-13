@@ -140,3 +140,56 @@ Cuando el pipeline offline esté sólido, conectar con `MCP_ADS_SERVICE_PLAN.md`
 2. Correr el **Grupo A Telcel (12 anuncios)** con el pipeline ya por fases:
    `.venv/Scripts/python.exe -m discovery.pipeline --channel @Telcel --n 12`
 3. Medir s/anuncio reales por etapa → recalibrar esta proyección con datos duros.
+
+---
+
+## 9. Estado de implementación (2026-09-13) — números MEDIDOS
+
+Implementado y verificado en esta máquina (RTX 4090). Esta sección **reemplaza** las
+proyecciones de §5 donde difieran.
+
+### Qué quedó implementado
+
+| Fase | Estado | Módulos / cambios |
+|---|---|---|
+| **1. Residencia + fases** | ✅ | `pipeline.py` reescrito a fases de modelo; `neural.py` (TRIBE residente); `transcribe.unload()`, `understand.unload()`; `gpu.py` |
+| **2. Caché + idempotencia** | ✅ | `cache.py` (content-addressed `sha256(video‖etapa‖params)`, `stats()`, `prune()`); resume por defecto; `--no-cache` |
+| **3. Store + grafo** | ✅ | `store.py` (SQLite anuncios + entidades + `top_entities()`); `entities.py` (canonicalización/dedup); `graph.py` usa entidades canónicas |
+| **4. Solapamiento CPU/GPU** | ⚠️ parcial | `fetch.download_many()` en paralelo (workers=4). **Falta** batch real en Qwen/TRIBE (riesgo de VRAM; no implementado) |
+| **5. Disco** | ⚠️ parcial | `CENTAURO_HF_HOME` → `HF_HOME`; `--prune-cache N`. **Falta** alerta automática de disco |
+
+### Costos medidos vs. antes
+
+| Etapa | Antes | Ahora (medido) | Ganancia |
+|---|---|---|---|
+| transcribe | recarga de modelo por anuncio | **~14.5 s/anuncio** (Whisper residente) | ~5× |
+| understand (Qwen2.5-VL-7B, 12 frames) | ~600 s/anuncio | **~19.5 s/anuncio** | **~30×** |
+| neural TRIBE (frío) | ~468 s/anuncio | **~176 s/anuncio** (30 s y 60 s de video) | ~2.6× |
+| neural TRIBE (features V-JEPA cacheadas) | — | **~2 s** | — |
+| re-corrida completa (resume) | reprocesa todo | **0.1 s** | — |
+| re-corrida (cache hit, store vacío) | — | **0.00 s/anuncio, sin cargar modelos** | — |
+
+Pruebas de verificación ejecutadas:
+- 2 anuncios por fases, cache miss → 70.8 s total.
+- Re-run mismo comando → **0.1 s** (resume desde store).
+- Store borrado, caché intacta, 3 URLs fijas → **3/3 cache hits, 0.00 s/ad, sin `Loading weights`**.
+- Fase neural: TRIBE cargado **una vez** para 2 anuncios → 352.5 s (176 s/ad).
+- Grafo: 33 nodos / 39 aristas, **3 aristas anuncio↔anuncio** por entidades canónicas
+  (`marca:telcel`, `obj:telefono`, `tema:tecnologia`), `red_dominante=Vis` en 2 anuncios.
+
+### Correcciones a las proyecciones (§5)
+
+- El cuello de botella real del pipeline **no es la inferencia de TRIBE** sino la
+  **codificación de video V-JEPA** (~1.8 s/frame-batch; un anuncio de 60 s ≈ 4 min).
+  Es donde más rinde cachear features y, a escala, considerar batching/aceleración.
+- `neural` cold ≈ **176 s/anuncio** (no ~100 s) para anuncios de 30–60 s.
+- El VLM pasó de ser el cuello (600 s) a ser barato (19.5 s) tras residencia + cap de frames.
+
+### Pendiente para el siguiente salto
+
+1. **Batch real** en Qwen/TRIBE (Fase 4) con batch adaptativo a VRAM.
+2. **Dedup semántico** de entidades (embeddings) — hoy solo canonicaliza strings, no fusiona
+   "persona con teléfono" ≈ "persona usando móvil".
+3. **Alerta de disco** automática (el llenado de C: ya rompió una corrida).
+4. Mover el corpus al store definitivo (SQLite → Postgres) al pasar a servicio.
+

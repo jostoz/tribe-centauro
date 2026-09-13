@@ -20,7 +20,12 @@ def _ensure_ffmpeg_dir() -> str:
     dst_dir.mkdir(parents=True, exist_ok=True)
     dst = dst_dir / ("ffmpeg.exe" if __import__("os").name == "nt" else "ffmpeg")
     if not dst.exists():
-        shutil.copy2(imageio_ffmpeg.get_ffmpeg_exe(), dst)
+        try:
+            shutil.copy2(imageio_ffmpeg.get_ffmpeg_exe(), dst)
+        except (OSError, shutil.SameFileError):
+            # carrera con otro hilo de descarga: si ya quedó copiado, seguimos
+            if not dst.exists():
+                raise
     return str(dst_dir)
 
 
@@ -68,6 +73,22 @@ def download(urls: Iterable[str], outdir: Path | str = DEFAULT_OUT) -> List[dict
             else:
                 records.append(_record(info, outdir))
     return records
+
+
+def download_many(urls: Iterable[str], outdir: Path | str = DEFAULT_OUT, workers: int = 4) -> List[dict]:
+    """Descarga en paralelo (I/O de red) y devuelve un registro por anuncio.
+
+    Descargar es I/O-bound: solaparlo con la GPU evita que el worker espere la red.
+    Filas ordenadas por id para que la corrida sea reproducible.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    urls = list(urls)
+    records: List[dict] = []
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        for part in pool.map(lambda u: download([u], outdir), urls):
+            records.extend(part)
+    return sorted(records, key=lambda r: r["id"])
 
 
 def _flat_urls(target: str, n: int) -> List[str]:

@@ -49,6 +49,15 @@ def _pipe(model: str = "openai/whisper-small"):
     return _PIPE
 
 
+def unload() -> None:
+    """Suelta el modelo Whisper y libera VRAM (fin de la fase de transcripción)."""
+    global _PIPE
+    _PIPE = None
+    from discovery.gpu import free_gpu
+
+    free_gpu()
+
+
 def transcribe(
     video_path: str | Path,
     model: str = "openai/whisper-small",

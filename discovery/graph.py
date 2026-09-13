@@ -18,12 +18,7 @@ from typing import Dict, List
 
 import networkx as nx
 
-_ATTR_KINDS = [
-    ("objetos", "obj"),
-    ("personajes", "pers"),
-    ("temas", "tema"),
-    ("marca_elementos", "marca"),
-]
+from discovery import entities as _ent
 
 _COLORS = {
     "ad": "#e63946",
@@ -32,10 +27,6 @@ _COLORS = {
     "tema": "#2a9d8f",
     "marca": "#8338ec",
 }
-
-
-def _norm(v: str) -> str:
-    return " ".join(str(v).strip().lower().split())
 
 
 def build_graph(records: List[dict]) -> nx.Graph:
@@ -57,15 +48,12 @@ def build_graph(records: List[dict]) -> nx.Graph:
         )
         attrs = set()
         u = r.get("understanding", {}) or {}
-        for key, prefix in _ATTR_KINDS:
-            for v in u.get(key, []) or []:
-                if not isinstance(v, str) or not v.strip():
-                    continue
-                node = f"{prefix}:{_norm(v)}"
-                if node not in G:
-                    G.add_node(node, kind=prefix, label=v.strip())
-                G.add_edge(aid, node, kind="tiene")
-                attrs.add(node)
+        for kind, canon, raw in _ent.extract_entities(u):
+            node = f"{kind}:{canon}"
+            if node not in G:
+                G.add_node(node, kind=kind, label=raw)
+            G.add_edge(aid, node, kind="tiene")
+            attrs.add(node)
         ad_attrs[aid] = attrs
 
     # aristas anuncio-anuncio por atributos compartidos
