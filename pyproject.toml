@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tribe-centauro"
+version = "2.0.0"
+description = "Análisis neural de creativos publicitarios con TRIBE v2"
+requires-python = ">=3.11,<3.14"
+license = { text = "CC-BY-NC-4.0" }
+dependencies = [
+    # --- TRIBE v2 y sus pares exactos (verificado en su pyproject.toml) ---
+    # NO está en PyPI: se instala desde git.
+    "tribev2 @ git+https://github.com/facebookresearch/tribev2.git",
+    "torch>=2.5.1,<2.7",
+    "numpy==2.2.6",
+    "torchvision>=0.20,<0.22",
+    "neuralset==0.0.2",
+    "neuraltrain==0.0.2",
+    "exca==0.5.20",
+    "x_transformers==1.27.20",
+    "einops",
+    "pyyaml",
+    "moviepy>=2.2.1",
+    "huggingface_hub",
+    "gtts",
+    "langdetect",
+    "spacy",
+    "soundfile",
+    "Levenshtein",
+    "julius",
+    "transformers",
+    # --- Superficie de servicio ---
+    "nibabel>=5.2",
+    "scipy>=1.11",
+    "pandas>=2.1",
+    "fastapi>=0.110",
+    "uvicorn>=0.27",
+    "pydantic>=2.5",
+    "python-dotenv>=1.0",
+    "python-multipart>=0.0.9",
+]
+
+[project.optional-dependencies]
+plotting = ["nilearn", "matplotlib", "seaborn", "colorcet"]
+mcp = ["mcp>=1.0"]
+dev = ["pytest>=7.4", "pytest-cov", "black", "flake8", "mypy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.setuptools.packages.find]
+include = ["core*", "service*", "api*", "ads*", "mcp*"]
+
+[tool.black]
+line-length = 88
+
+[tool.isort]
+profile = "black"
