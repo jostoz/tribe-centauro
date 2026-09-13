@@ -177,19 +177,48 @@ def phase_understand(
 # Fase 3 — perfil neural (TRIBE residente)
 # ---------------------------------------------------------------------------
 def phase_neural(con, ads: List[dict], m: Metrics, use_cache: bool) -> None:
+    """Fase neural en DOS pasadas, con un solo load del modelo.
+
+    A) **features**: codifica V-JEPA/audio de TODOS los anuncios (la parte cara,
+       minutos por anuncio) y las deja cacheadas.
+    B) **forwards**: ejecuta el forward de TRIBE para todos (barato con features
+       en caché; ~1-2 s por anuncio).
+
+    Así la GPU se dedica a la tarea pesada de forma contigua en vez de alternar
+    encode→forward→encode, y los forwards quedan repetibles sin re-codificar.
+    """
     pend = [a for a in ads if not use_cache or not a.get("neural")]
     if not pend:
         print("[neural] ya completo (resume)")
         return
-    print(f"[neural] {len(pend)} anuncios (TRIBE residente)...")
+    print(f"[neural] {len(pend)} anuncios (TRIBE residente, 2 pasadas)...")
     from discovery.neural import NeuralAnalyzer
 
     an = NeuralAnalyzer()
     an.load()
+
+    # --- Pasada A: features (V-JEPA/audio) de todos ---
+    todo = []
     for a in pend:
+        fkey = cache.content_key(a["video_path"], "features", "tribev2|vjepa")
         t0 = time.time()
-        key = cache.content_key(a["video_path"], "neural", "tribev2|default")
-        cached = None if not use_cache else cache.get("neural", key)
+        if use_cache and cache.get("features", fkey) is not None:
+            m.add("features", a["id"], 0.0, True)
+        else:
+            try:
+                n = an.extract_features(a["video_path"])
+                cache.put("features", fkey, {"batches": n})
+                m.add("features", a["id"], time.time() - t0, False)
+            except Exception as exc:  # noqa: BLE001
+                print(f"      [neural] {a['id']} features FALLO: {type(exc).__name__}: {exc}")
+                continue
+        todo.append(a)
+
+    # --- Pasada B: forwards (features ya en caché) ---
+    for a in todo:
+        t0 = time.time()
+        nkey = cache.content_key(a["video_path"], "neural", "tribev2|default")
+        cached = None if not use_cache else cache.get("neural", nkey)
         if cached is not None:
             a["neural"] = cached
             m.add("neural", a["id"], time.time() - t0, True)
@@ -197,7 +226,7 @@ def phase_neural(con, ads: List[dict], m: Metrics, use_cache: bool) -> None:
             continue
         try:
             a["neural"] = an.analyze(a["video_path"])
-            cache.put("neural", key, a["neural"])
+            cache.put("neural", nkey, a["neural"])
             _upsert(con, a)
             m.add("neural", a["id"], time.time() - t0, False)
         except Exception as exc:  # noqa: BLE001 - un anuncio roto no debe tumbar la fase

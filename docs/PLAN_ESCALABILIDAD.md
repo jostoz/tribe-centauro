@@ -179,6 +179,12 @@ Pruebas de verificación ejecutadas:
 - **Batch del VLM** (7B, 12 frames, 3 anuncios, mismo proceso): secuencial 19.2 s/ad vs
   `--vlm-batch 3` **7.5–12.1 s/ad (x1.6–2.6)**, con **3/3 respuestas idénticas** a la
   inferencia individual. La guardia disparó 1 vez por corrida (fallback = 1 forward extra).
+- **Neural en dos pasadas** (anuncio nuevo de 20 s): `features` **125.3 s** + `forward`
+  **0.94 s**.
+- **Grupo A Telcel (15 anuncios, 14 con perfil neural):** fase de contenido 11 ads en 194.6 s
+  (transcribe 8.8 s/ad, understand batcheado **7.8 s/ad**); fase neural 269 s/ad (dominada por
+  V-JEPA). Resultados y límites en [`GRUPO_A_RESULTADOS.md`](GRUPO_A_RESULTADOS.md): un
+  contraste (ritmo → DorsAttn +7.1 pp) direccionalmente correcto; los otros infrapotenciados.
 
 ### Bug encontrado y corregido durante la implementación
 
@@ -204,8 +210,9 @@ degenerar en un anuncio concreto (bucle en la decodificación greedy).
    "persona con teléfono" ≈ "persona usando móvil".
 2. **Alerta de disco** automática (el llenado de C: ya rompió una corrida).
 3. Mover el corpus al store definitivo (SQLite → Postgres) al pasar a servicio.
-4. **Batch de TRIBE: descartado como palanca.** El coste lo domina la codificación V-JEPA
-   (~1.8 s/frame-batch; un anuncio de 60 s ≈ 4 min) frente a ~1–2 s del forward de TRIBE.
-   Fusionar los *events* de varios anuncios en un solo DataFrame atribuiría mal los
-   segmentos. La vía correcta es **cachear features de V-JEPA** (ya activo).
+4. ~~Batch de TRIBE~~ → **resuelto con dos pasadas.** La fase neural ejecuta primero **todas**
+   las features (V-JEPA/audio, lo caro) y después **todos** los forwards. Medido en un anuncio
+   nuevo de 20 s: `features` **125.3 s** y `neural` (forward) **0.94 s**. La GPU trabaja seguida
+   en lo pesado en vez de alternar encode→forward→encode, y los forwards son repetibles sin
+   re-codificar.
 

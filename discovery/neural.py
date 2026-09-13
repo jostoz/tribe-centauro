@@ -49,6 +49,33 @@ class NeuralAnalyzer:
         if Path(self.atlas_dir).is_dir():
             self._roi = RoiIndex.from_schaefer(self.atlas_dir)
 
+    def extract_features(self, video_path: str | Path) -> int:
+        """Fuerza y cachea las features (V-JEPA/audio) del anuncio SIN forward.
+
+        Iterar el dataloader ejecuta los extractores y escribe sus features en la
+        caché de neuralset. Separar esto del forward permite: (a) codificar todos los
+        anuncios seguidos (GPU ocupada en la tarea pesada), y (b) que los forwards
+        posteriores sean baratos y repetibles. Devuelve el nº de batches iterados.
+        """
+        if self._model is None:
+            raise RuntimeError("llama a load() antes de extract_features()")
+        import pandas as pd
+        from tribev2.demo_utils import get_audio_and_text_events
+
+        event = {
+            "type": "Video",
+            "filepath": str(video_path),
+            "start": 0,
+            "timeline": "default",
+            "subject": "default",
+        }
+        events = get_audio_and_text_events(pd.DataFrame([event]), audio_only=True)
+        loader = self._model.data.get_loaders(events=events, split_to_build="all")["all"]
+        n = 0
+        for _batch in loader:  # dispara la extracción; el resultado queda cacheado
+            n += 1
+        return n
+
     def analyze(self, video_path: str | Path) -> Dict:
         """Perfil por red funcional (unidades crudas) + red dominante."""
         if self._model is None:

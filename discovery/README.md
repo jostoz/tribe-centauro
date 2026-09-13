@@ -18,7 +18,9 @@ de esa fase, y luego se libera VRAM. Así el modelo se carga 3 veces en total, n
 Fase 0  fetch       (CPU/red, descargas en paralelo)
 Fase 1  transcribe  (Whisper residente)  → unload
 Fase 2  understand  (Qwen2.5-VL residente) → unload
-Fase 3  neural      (TRIBE + V-JEPA residente) → unload   [opt-in]
+Fase 3  neural      (TRIBE + V-JEPA residente, 2 pasadas) → unload   [opt-in]
+        3a  features : V-JEPA/audio de TODOS los anuncios (lo caro, minutos/anuncio) → cacheado
+        3b  forwards : forward de TRIBE de TODOS (~1 s/anuncio con features cacheadas)
         → store SQLite → grafo de contenidos
 ```
 
@@ -121,11 +123,12 @@ En ambas corridas **3/3 respuestas idénticas** a la inferencia individual. La g
 disparó 1 vez (anuncio `BsMrRFH390k`, un montaje antiguo propenso a bucle): el coste del
 fallback es un forward extra, que es lo que separa x2.6 de x1.6.
 
-> **Nota: TRIBE no se batchea.** El coste de la fase `neural` lo domina la codificación
-> de video V-JEPA (~1.8 s/frame-batch), no el forward de TRIBE (~1–2 s). Batchear
-> anuncios exigiría fusionar sus *events* en un solo DataFrame, con atribución frágil
-> de los segmentos. La palanca correcta ahí es **cachear features de V-JEPA**, que ya
-> está activo.
+> **Nota: TRIBE no se batchea, se separa en dos pasadas.** El coste lo domina la codificación
+> V-JEPA (~1.8 s/frame-batch), no el forward de TRIBE (~1 s). En vez de batchear anuncios (que
+> exigiría fusionar sus *events* con atribución frágil de segmentos), la fase neural se ejecuta
+> en **dos pasadas**: primero **todas** las features (la GPU trabaja seguida en lo caro, sin
+> alternar encode→forward→encode) y después **todos** los forwards, que con las features
+> cacheadas cuestan ~1 s/anuncio y son repetibles sin re-codificar.
 
 ## Rendimiento medido (RTX 4090, esta máquina)
 
@@ -133,7 +136,8 @@ fallback es un forward extra, que es lo que separa x2.6 de x1.6.
 |---|---|---|
 | transcribe | ~14.5 s/anuncio | Whisper residente (antes: recarga por anuncio) |
 | understand (7B, 12 frames) | ~19.2 s/anuncio secuencial · **7.5–12.1 s/anuncio con `--vlm-batch 3`** (x1.6–2.6) | antes ~600 s/anuncio sin cap de frames ni residencia |
-| neural (TRIBE) | ~176 s/anuncio en frío | **dominado por V-JEPA**; 2 s si las features están cacheadas |
+| neural `features` (V-JEPA/audio) | **~125 s por anuncio de 20 s**; ~269 s/anuncio en el corpus 20–60 s | lo caro; contiguo, sin alternar con forwards |
+| neural `forward` (TRIBE) | **~0.9 s/anuncio** con features cacheadas | repetible sin re-codificar |
 | resume desde store | ~0.1 s | corrida completa ya procesada |
 | cache hit | ~0.00 s/anuncio | ni carga el modelo |
 
