@@ -6,6 +6,12 @@
 > Este informe es **exploratorio**. No hay test de significancia y los valores están en
 > **unidades crudas del modelo, sin calibrar**. Se reportan diferencias descriptivas, no
 > conclusiones.
+>
+> **Nota temporal:** este análisis **no depende de la alineación**. Todas las métricas son
+> medias sobre los timesteps del anuncio (composición por red), no valores de un segundo
+> concreto. La convención temporal del modelo ya está cerrada
+> (`alignment = "stimulus-aligned"`, precisión ≈ ±1.5 s — `docs/FASE_0.5_ALINEACION.md`),
+> así que cualquier lectura por segundo que se añada después debe citar esa precisión.
 
 ---
 

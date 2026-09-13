@@ -77,6 +77,7 @@ def main() -> int:
     prof = temporal_profile(preds)
     peaks = find_peaks(prof, relative_threshold=1.3)
     print("\n--- perfil temporal (activacion media |.| por timestep ~ 1s) ---")
+    print("    (preds[k] = respuesta al segundo k; stimulus-aligned, precision ~±1.5 s)")
     print("  t(s): " + " ".join(f"{v:.3f}" for v in prof[:30]))
     print(f"  picos de atencion (>1.3x media): {[p['timestep'] for p in peaks]}")
 

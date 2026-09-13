@@ -130,6 +130,17 @@ fallback es un forward extra, que es lo que separa x2.6 de x1.6.
 > alternar encode→forward→encode) y después **todos** los forwards, que con las features
 > cacheadas cuestan ~1 s/anuncio y son repetibles sin re-codificar.
 
+## Convención temporal (cerrada en Fase 0.5)
+
+`preds[k]` es la respuesta al **segundo `k`** del anuncio
+(`core.ordering.ALIGNMENT_CONVENTION == "stimulus-aligned"`). El retardo hemodinámico de
+5 s **ya lo aplica el checkpoint** al construir su objetivo de entrenamiento
+(`estímulo(t) → BOLD(t+5)`): **no hay que restarlo** al leer `preds`.
+
+Precisión de la localización absoluta: **≈ ±1.5 s** — una rejilla de 1 TR con un sesgo de
+~1.5 s; no autoriza a afirmar precisión sub-segundo. Verificado empíricamente sobre
+4 anuncios reales con dos métodos independientes: [`docs/FASE_0.5_ALINEACION.md`](../docs/FASE_0.5_ALINEACION.md).
+
 ## Rendimiento medido (RTX 4090, esta máquina)
 
 | Etapa | Coste | Nota |

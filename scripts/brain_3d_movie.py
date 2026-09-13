@@ -3,6 +3,11 @@
 Superficie cortical (ambos hemisferios) con slider de tiempo + botón play:
 cada frame es un segundo (TR) del anuncio. WebGL puro (plotly), sin servidor.
 
+Convención temporal: ``preds[k]`` = respuesta al **segundo k** del anuncio
+(``core.ordering.ALIGNMENT_CONVENTION == "stimulus-aligned"``; el offset de 5 s ya está
+aplicado). Precisión de la localización absoluta: **≈ ±1.5 s** — el slider no tiene
+precisión sub-segundo. Ver docs/FASE_0.5_ALINEACION.md.
+
 Uso:
     .venv/Scripts/python.exe scripts/brain_3d_movie.py [preds.npy] [salida.html]
     (por defecto usa data/discovery/comercial_preds.npy)
@@ -67,7 +72,7 @@ def main() -> int:
         for t in range(T)
     ]
     fig.update_layout(
-        title="comercial Telcel — respuesta cortical a lo largo del anuncio (TRIBE v2, 1 frame = 1 s)",
+        title="respuesta cortical a lo largo del anuncio (TRIBE v2, stimulus-aligned, 1 frame = 1 s ±1.5 s)",
         scene=dict(
             xaxis=dict(visible=False), yaxis=dict(visible=False), zaxis=dict(visible=False),
             aspectmode="data",

@@ -5,6 +5,12 @@ Genera:
   - brain_peak_*.html    : superficie 3D interactiva (WebGL, nilearn view_surf)
   - brain_movie.gif      : animación segundo-a-segundo (hemisferio izq, vista lateral)
 
+Convención temporal: ``preds[k]`` es la respuesta al **segundo k** del anuncio
+(``core.ordering.ALIGNMENT_CONVENTION == "stimulus-aligned"``; el offset hemodinámico de
+5 s ya lo aplica el checkpoint, NO hay que restarlo). Precisión de la localización
+absoluta: **≈ ±1.5 s** — las etiquetas ``t=Ns`` no son de precisión sub-segundo.
+Ver docs/FASE_0.5_ALINEACION.md.
+
 Uso:
     .venv/Scripts/python.exe scripts/visualize_brain.py ads/comercial.mp4
 """
@@ -63,7 +69,7 @@ def main() -> int:
 
     prof = np.mean(np.abs(preds), axis=1)
     t = int(np.argmax(prof))
-    print(f"timestep pico: t={t}s (de {preds.shape[0]})")
+    print(f"timestep pico: t={t}s (de {preds.shape[0]}) — stimulus-aligned, ±1.5 s")
     L, R = preds[t, :HEMI], preds[t, HEMI:]
 
     fs = datasets.fetch_surf_fsaverage("fsaverage5")
@@ -83,7 +89,10 @@ def main() -> int:
             vmax=vmax, threshold=vmax * 0.15, colorbar=False, axes=ax,
         )
         ax.set_title(title, fontsize=11)
-    fig.suptitle(f"{video.stem} — activación cortical en t={t}s (TRIBE v2)", fontsize=13)
+    fig.suptitle(
+        f"{video.stem} — activación cortical en t={t}s ±1.5s (TRIBE v2, stimulus-aligned)",
+        fontsize=13,
+    )
     png = OUT / "brain_peak.png"
     fig.savefig(png, dpi=130, bbox_inches="tight")
     plt.close(fig)
