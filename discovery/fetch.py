@@ -12,6 +12,24 @@ import yt_dlp
 
 DEFAULT_OUT = Path("data/ads")
 
+# Espaciado entre peticiones: disparar cientos de llamadas seguidas hace que YouTube responda
+# "Sign in to confirm you're not a bot" (bloqueo a nivel de IP, verificado). Con throttling y
+# concurrencia baja el riesgo baja mucho.
+THROTTLE = {"sleep_interval": 1, "max_sleep_interval": 4, "retries": 3}
+
+# Si existe, se usa para autenticar (YouTube bloquea con "Sign in to confirm you're not a bot"
+# tras muchas peticiones). Exportar con una extensión tipo "Get cookies.txt LOCALLY".
+COOKIES_FILE = Path("data/cookies.txt")
+COOKIES_HINT = (
+    "YouTube pidió autenticación (anti-bot). Exporta las cookies del navegador a "
+    "data/cookies.txt (extensión 'Get cookies.txt LOCALLY') y reintenta."
+)
+
+
+def _cookies_opt() -> dict:
+    env = Path(__import__("os").environ.get("CENTAURO_COOKIES", COOKIES_FILE))
+    return {"cookiefile": str(env)} if env.is_file() else {}
+
 
 def _ensure_ffmpeg_dir() -> str:
     """yt-dlp busca un binario llamado ffmpeg(.exe); el de imageio-ffmpeg tiene
@@ -39,6 +57,8 @@ def _ydl_download_opts(outdir: Path) -> dict:
         "no_warnings": True,
         "noprogress": True,
         "ignoreerrors": True,
+        **THROTTLE,
+        **_cookies_opt(),
     }
 
 
@@ -72,6 +92,8 @@ def fetch_stats(urls: Iterable[str], workers: int = 4) -> List[dict]:
         "no_warnings": True,
         "skip_download": True,
         "ignoreerrors": True,
+        **THROTTLE,
+        **_cookies_opt(),
     }
 
     def one(url: str):
