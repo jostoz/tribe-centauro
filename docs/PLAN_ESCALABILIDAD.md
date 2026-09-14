@@ -160,6 +160,11 @@ proyecciones de §5 donde difieran.
 
 ### Costos medidos vs. antes
 
+> ⚠️ **Cota superior, no rendimiento limpio.** Estas mediciones se tomaron en una máquina que en
+> varios momentos tenía **otro proyecto consumiendo el CPU al 100 %** (la fase de features es mitad
+> CPU por la decodificación de video). Con la máquina dedicada, los tiempos por anuncio son
+> **~1.7× menores** (verificado: 4.5 min/anuncio con contención vs ~2.7 min limpio).
+
 | Etapa | Antes | Ahora (medido) | Ganancia |
 |---|---|---|---|
 | transcribe | recarga de modelo por anuncio | **~14.5 s/anuncio** (Whisper residente) | ~5× |
