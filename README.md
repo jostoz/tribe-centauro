@@ -11,8 +11,10 @@ Predice la respuesta fMRI de un anuncio (video, audio o texto) sobre la malla co
 |---|---|
 | Inferencia TRIBE v2 (una fuente por llamada) | ✅ |
 | ROIs anatómicas reales (Schaefer 2018, 7 redes) | ✅ |
+| Alineación temporal verificada (Fase 0.5) | ✅ `docs/FASE_0.5_ALINEACION.md` |
 | Métricas en unidades crudas, con procedencia | ✅ |
 | Comparación A/B por permutación de bloques | ✅ |
+| Edición guiada por feedback TRIBE | ⏳ evaluado — `docs/EVALUACION_EDICION_POR_FEEDBACK.md` |
 | API REST (`/health`, `/validate`, `/analyze`, `/compare`, `/upload`) | ✅ |
 | Servidor MCP para agentes | ⏳ Fase 1-2, ver `MCP_ADS_SERVICE_PLAN.md` |
 | Calibración contra resultados de campaña | ⏳ Fase 4 |
@@ -107,19 +109,31 @@ curl -X POST http://127.0.0.1:8000/api/ads/analyze \
 python -m pytest tests/ -q
 ```
 
-37 tests. Cubren: máscaras de ROI contra el atlas real, contrato de fuentes del modelo
-(con un doble, sin GPU), serialización JSON-safe, y una demostración del falso positivo
-del t-test aplanado frente a la permutación por bloques.
+66 tests (65 pasan; 1 se salta si el `config.yaml` del checkpoint ya está normalizado). Cubren:
+máscaras de ROI contra el atlas real, contrato de fuentes del modelo (con un doble, sin
+GPU), contrato de la convención de alineación temporal, serialización JSON-safe, y una
+demostración del falso positivo del t-test aplanado frente a la permutación por bloques.
 
-## Convenciones del modelo (a verificar en Fase 0.5)
+## Convenciones del modelo (verificadas)
 
 `TR = 1 s`. Orden de vértices `[hemisferio izquierdo 0..10241 | derecho 0..10241]`.
-Offset hemodinámico de 5 s declarado, pero **la convención de alineación respecto al
-onset del estímulo no está verificada** — `metadata.alignment = "unverified"`. No
-interprete timesteps como segundos exactos hasta cerrarlo.
 
-Sin verificar: comportamiento de `ChunkEvents(min_duration=30)` con anuncios de 6-15 s,
-y si un anuncio mudo pierde eventos por `RemoveMissing()`.
+**Alineación temporal — cerrada.** `metadata.alignment = "stimulus-aligned"`:
+`preds[k]` es la respuesta al **segundo `k`** del anuncio. El retardo hemodinámico de
+5 s ya lo aplica el checkpoint al construir su objetivo de entrenamiento
+(`estímulo(t) → BOLD(t+5)`); **no hay que restarlo** al leer `preds`. Verificado sobre 4
+anuncios reales con dos métodos independientes (`edge = -1.48 + 1.023·m`, y
+`envelope tracking` con lag mediano +0.5 TR). Precisión de la localización absoluta:
+**≈ ±1.5 s**, no sub-segundo. Evidencia y reproducibilidad en
+[`docs/FASE_0.5_ALINEACION.md`](docs/FASE_0.5_ALINEACION.md).
+
+**También verificado** (ver [`docs/FASE_0.5_VEREDICTO.md`](docs/FASE_0.5_VEREDICTO.md)):
+clips de 6–15 s frente a `ChunkEvents(min_duration=30)` no se descartan, y un anuncio mudo
+produce inferencia válida.
+
+**Sin verificar:** la potencia discriminante de la ruta de **video** (V-JEPA) y la de
+**texto** (requiere token HF con Llama-3.2 gated + `gTTS`). La convención de alineación es
+independiente de la ruta, porque el `offset` vive en el objetivo de fMRI compartido.
 
 ## Licencia
 
