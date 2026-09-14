@@ -13,7 +13,12 @@ from scipy import stats
 
 from core.ordering import FSAAVERAGE5_VERTICES
 from service.metrics.roi import RoiIndex
-from service.metrics.stats import compare_parcels, paired_block_permutation
+from service.metrics.stats import (
+    compare_parcels,
+    group_permutation_test,
+    holm_bonferroni,
+    paired_block_permutation,
+)
 
 ATLAS_DIR = "data/atlas/schaefer200"
 
@@ -125,3 +130,60 @@ def test_compare_parcels_reports_raw_units_and_all_networks(roi_index):
     # Sin calibración no debe declararse un ganador de campaña.
     assert "winner" not in result
     assert "improvement_percentage" not in str(result)
+
+
+# --- dos grupos independientes con covariable (Grupo A2) ---------------------
+
+
+def test_holm_bonferroni_matches_worked_example():
+    # Ejemplo canónico: p = [0.01, 0.04, 0.03] -> ajustados [0.03, 0.06, 0.06]
+    adj = holm_bonferroni(np.array([0.01, 0.04, 0.03]))
+    assert np.allclose(adj, [0.03, 0.06, 0.06])
+    # Nunca menor que el p crudo, nunca mayor que 1, y monótono respecto al orden.
+    assert np.all(adj >= np.array([0.01, 0.04, 0.03]) - 1e-12)
+    assert np.all(adj <= 1.0)
+
+
+def test_group_permutation_detects_real_separation():
+    rng = np.random.default_rng(0)
+    n = 40
+    labels = np.array([True] * 20 + [False] * 20)
+    values = rng.normal(0, 1, size=(n, 1)) + labels[:, None] * 3.0
+
+    res = group_permutation_test(values, labels, n_permutations=2000, seed=0)
+
+    assert res.p_values[0] < 0.01
+    assert res.n_a == 20 and res.n_b == 20
+
+
+def test_group_permutation_does_not_invent_an_effect():
+    rng = np.random.default_rng(1)
+    labels = np.array([True] * 15 + [False] * 15)
+    values = rng.normal(0, 1, size=(30, 1))  # ruido puro, sin efecto de grupo
+
+    res = group_permutation_test(values, labels, n_permutations=2000, seed=0)
+
+    assert res.p_values[0] > 0.05
+
+
+def test_group_permutation_adjusts_for_correlated_covariate():
+    """Una covariable correlacionada con el grupo produce un falso positivo si no se ajusta.
+
+    Es la razón de usar Freedman–Lane: aquí el efecto real es SOLO la duración, y la
+    etiqueta está correlacionada con ella. Sin ajustar sale "significativo"; ajustando, no.
+    """
+    rng = np.random.default_rng(7)
+    n = 60
+    duration = rng.uniform(10, 60, n)
+    labels = rng.random(n) < (duration / 80.0)          # etiqueta correlacionada
+    values = (0.10 * duration + rng.normal(0, 0.2, n))[:, None]  # efecto = solo duración
+
+    unadjusted = group_permutation_test(values, labels, n_permutations=2000, seed=0)
+    adjusted = group_permutation_test(
+        values, labels, covariates=duration[:, None], n_permutations=2000, seed=0,
+        covariate_name="duration",
+    )
+
+    assert unadjusted.p_values[0] < 0.05, "el confusor debería dar un falso positivo"
+    assert adjusted.p_values[0] > 0.05, "al ajustar, el efecto de grupo debe desaparecer"
+    assert adjusted.adjusted_for == "duration"

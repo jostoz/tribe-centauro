@@ -214,3 +214,127 @@ def _bootstrap_ci(
     resampled = block_means[idx].mean(axis=(1, 2))
     lo, hi = np.percentile(resampled, [2.5, 97.5])
     return float(lo), float(hi)
+
+
+# ---------------------------------------------------------------------------
+# Dos grupos independientes de creativos (p. ej. rápido vs lento), con covariables
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class GroupTestResult:
+    """Prueba de permutación entre dos grupos independientes, por unidad (red/parcela)."""
+
+    statistic: np.ndarray      # coeficiente del grupo por unidad
+    p_values: np.ndarray       # p bilateral por unidad
+    n_a: int
+    n_b: int
+    n_permutations: int
+    adjusted_for: Optional[str] = None
+
+    def holm(self) -> np.ndarray:
+        """p-valores ajustados por Holm–Bonferroni (controla el error de familia)."""
+        return holm_bonferroni(self.p_values)
+
+    def as_dict(self, units: Optional[list] = None) -> Dict:
+        units = units or list(range(len(self.p_values)))
+        adj = self.holm()
+        return {
+            unit: {
+                "statistic": float(self.statistic[i]),
+                "p_value": float(self.p_values[i]),
+                "p_holm": float(adj[i]),
+                "significant_holm": bool(adj[i] < 0.05),
+            }
+            for i, unit in enumerate(units)
+        }
+
+
+def group_permutation_test(
+    values: np.ndarray,
+    is_group_a: np.ndarray,
+    covariates: Optional[np.ndarray] = None,
+    n_permutations: int = 10000,
+    seed: int = 0,
+    covariate_name: Optional[str] = None,
+) -> GroupTestResult:
+    """Permutación bilateral para **dos grupos independientes** sobre ``n_units`` salidas.
+
+    ``values`` es ``(n_ads, n_units)`` (p. ej. shares de redes por anuncio) y ``is_group_a``
+    ``(n_ads,)`` booleano. El estadístico es el coeficiente de la dummy de grupo en una
+    regresión con las covariables controladas.
+
+    Con covariables se usa el esquema de **Freedman–Lane**: se permutan los residuos del
+    modelo reducido (sin el grupo) y se recalcula el estadístico del modelo completo. Eso
+    preserva el ajuste y evita el error de permutar la etiqueta con una covariable
+    correlacionada (que produciría falsos positivos, como demuestra el test del módulo).
+    """
+    y = np.asarray(values, dtype=float)
+    if y.ndim == 1:
+        y = y[:, None]
+    labels = np.asarray(is_group_a, dtype=bool)
+    n = y.shape[0]
+    if labels.shape[0] != n:
+        raise ValueError(f"labels {labels.shape} no coincide con values {y.shape}")
+    if covariates is not None:
+        cov = np.asarray(covariates, dtype=float)
+        if cov.ndim == 1:
+            cov = cov[:, None]
+        if cov.shape[0] != n:
+            raise ValueError("covariates y values deben tener el mismo nº de filas")
+
+    ones = np.ones((n, 1))
+    full = np.hstack([ones, labels[:, None].astype(float)] + ([cov] if covariates is not None else []))
+    reduced = np.hstack([ones] + ([cov] if covariates is not None else []))
+
+    beta_full, *_ = np.linalg.lstsq(full, y, rcond=None)
+    stat_obs = beta_full[1].copy()
+
+    pinv_full = np.linalg.pinv(full)
+    rng = np.random.default_rng(seed)
+    count = np.zeros(y.shape[1], dtype=int)
+
+    if covariates is None:
+        # sin covariables: permutar la etiqueta y reajustar
+        for _ in range(n_permutations):
+            perm = rng.permutation(n)
+            y_perm = y[perm]
+            beta, *_ = np.linalg.lstsq(full, y_perm, rcond=None)
+            count += np.abs(beta[1]) >= np.abs(stat_obs)
+    else:
+        # Freedman–Lane: permutar residuos del modelo reducido y reajustar el completo
+        beta_red, *_ = np.linalg.lstsq(reduced, y, rcond=None)
+        fitted = reduced @ beta_red
+        resid = y - fitted
+        for _ in range(n_permutations):
+            resid_perm = resid[rng.permutation(n)]
+            beta = pinv_full @ (fitted + resid_perm)
+            count += np.abs(beta[1]) >= np.abs(stat_obs)
+
+    p = (1.0 + count) / (1.0 + n_permutations)
+    return GroupTestResult(
+        statistic=stat_obs,
+        p_values=p,
+        n_a=int(labels.sum()),
+        n_b=int(n - labels.sum()),
+        n_permutations=n_permutations,
+        adjusted_for=covariate_name,
+    )
+
+
+def holm_bonferroni(p_values: np.ndarray) -> np.ndarray:
+    """p-valores ajustados por Holm–Bonferroni, en el orden original.
+
+    Paso descendente con corrección de monotonía: garantiza que ningún p ajustado quede por
+    debajo de uno ajustado previamente más pequeño.
+    """
+    p = np.asarray(p_values, dtype=float)
+    m = p.size
+    order = np.argsort(p, kind="stable")
+    adjusted = np.empty(m, dtype=float)
+    running = 0.0
+    for rank, idx in enumerate(order):
+        val = min(1.0, (m - rank) * p[idx])
+        running = max(running, val)
+        adjusted[idx] = running
+    return adjusted

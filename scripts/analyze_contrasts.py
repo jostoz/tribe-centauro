@@ -24,6 +24,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from discovery import store  # noqa: E402
+from service.metrics.stats import group_permutation_test  # noqa: E402
 
 NETS = ["Vis", "SomMot", "DorsAttn", "SalVentAttn", "Limbic", "Cont", "Default"]
 
@@ -80,7 +81,43 @@ def _adjusted(rows: list, label: str, is_a) -> None:
         print(f"  {k:11} {beta[1][i]*100:+6.1f}")
 
 
+def _formal(rows: list, label: str, is_a, n_perm: int, seed: int) -> None:
+    """Test de permutación bilateral por red, con y sin ajuste por duración, + Holm."""
+    values = np.array([r["share"] for r in rows])
+    labels = np.array([bool(is_a(r)) for r in rows])
+    dur = np.array([r["dur"] for r in rows])
+
+    unadj = group_permutation_test(values, labels, n_permutations=n_perm, seed=seed)
+    adj = group_permutation_test(
+        values, labels, covariates=dur[:, None],
+        n_permutations=n_perm, seed=seed, covariate_name="duración",
+    )
+    p_holm = adj.holm()
+
+    print(f"\n{label} — test formal (n_perm={n_perm}, semilla={seed})")
+    print(f"  n = {adj.n_a} vs {adj.n_b}")
+    print(f"  {'red':11} {'efecto(pp)':>10} {'p cruda':>9} {'p|dur':>9} {'p Holm':>9}  sig")
+    for i, k in enumerate(NETS):
+        sig = "sí" if p_holm[i] < 0.05 else "no"
+        print(
+            f"  {k:11} {adj.statistic[i]*100:+10.1f} {unadj.p_values[i]:9.4f} "
+            f"{adj.p_values[i]:9.4f} {p_holm[i]:9.4f}  {sig}"
+        )
+    print(
+        "  'p|dur' ajusta por duración (Freedman–Lane); 'p Holm' controla las 7 comparaciones.\n"
+        "  Efecto = coeficiente del grupo en puntos porcentuales de share."
+    )
+
+
 def main() -> int:
+    import argparse
+
+    ap = argparse.ArgumentParser(description="Contrastes del corpus sobre el perfil neural.")
+    ap.add_argument("--test", action="store_true", help="test formal de permutación + Holm")
+    ap.add_argument("--n-perm", type=int, default=10000, help="permutaciones (def. 10000)")
+    ap.add_argument("--seed", type=int, default=0)
+    args = ap.parse_args()
+
     con = store.connect()
     store.init(con)
     rows = load_rows(con)
@@ -97,18 +134,31 @@ def main() -> int:
     if len(fast) >= 2 and len(slow) >= 2:
         _contrast("RÁPIDO vs LENTO", fast, slow, "rápido", "lento")
         _adjusted(rows, "RÁPIDO vs LENTO", lambda r: r["ritmo"] == "rapido")
+        if args.test:
+            _formal(rows, "RÁPIDO vs LENTO", lambda r: r["ritmo"] == "rapido",
+                    args.n_perm, args.seed)
 
     with_f = [r for r in rows if r["caras"]]
     without_f = [r for r in rows if not r["caras"]]
     if len(with_f) >= 2 and len(without_f) >= 2:
         _contrast("CON CARAS vs SIN CARAS", with_f, without_f, "con caras", "sin caras")
         _adjusted(rows, "CON CARAS vs SIN CARAS", lambda r: r["caras"])
+        if args.test:
+            _formal(rows, "CON CARAS vs SIN CARAS", lambda r: r["caras"],
+                    args.n_perm, args.seed)
 
-    print(
-        "\nRecordatorio: shares relativos (%), unidades crudas sin calibrar, sin test de\n"
-        "significancia ni corrección por comparaciones múltiples. Marcador de dirección,\n"
-        "no de tamaño de efecto."
-    )
+    if args.test:
+        print(
+            "\nRecordatorio: shares relativos (%) en unidades crudas SIN CALIBRAR. El test es de\n"
+            "permutación con Holm dentro de cada contraste (7 redes); los dos contrastes no se\n"
+            "corrigen entre sí. Significativo ≠ relevante: es dirección, no tamaño de efecto."
+        )
+    else:
+        print(
+            "\nRecordatorio: shares relativos (%), unidades crudas sin calibrar, sin test de\n"
+            "significancia ni corrección por comparaciones múltiples. Marcador de dirección,\n"
+            "no de tamaño de efecto."
+        )
     return 0
 
 

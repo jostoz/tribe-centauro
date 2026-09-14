@@ -4,9 +4,9 @@
 **Reproducible:** `.venv/Scripts/python.exe scripts/analyze_contrasts.py`
 **Antecede:** [`GRUPO_A_RESULTADOS.md`](GRUPO_A_RESULTADOS.md) (n=15, contrastes infrapotenciados)
 
-> Exploratorio. **Sin test de significancia y sin corrección por comparaciones múltiples**
-> (7 redes × 2 contrastes). Shares relativos en unidades crudas sin calibrar. Son marcadores
-> de **dirección**, no de tamaño de efecto.
+> Exploratorio en su origen, **con test formal en §5** (permutación + Holm). Los valores están
+> en **unidades crudas sin calibrar**: shares relativos de la composición por red. Significativo
+> **no** es relevante ni vendible — es dirección, no tamaño de efecto.
 
 ---
 
@@ -74,31 +74,63 @@ en todos → **todos tienen locución**. No es que el ASR alucine sobre música:
 sin voz en este corpus**, así que el contraste no existe. El atributo queda medido y disponible
 para corpus futuros (requiere fuentes sin locución).
 
-## 5. Veredicto honesto
+## 5. Test formal (permutación + Holm)
 
-- **Un contraste pasa a ser defendible:** rápido vs lento → **DorsAttn +5.4 pp**, robusto al
-  control de duración y con separación mayor que la dispersión del grupo. Sigue siendo
-  **exploratorio** (sin test formal, sin replicar en otra marca).
-- **El otro queda abierto:** caras → Vis tiene un Δ atractivo pero su grupo control es demasiado
-  disperso y pequeño.
-- Lo que **no** cambia: `Vis` domina siempre (30–49 %), así que el análisis útil es la
-  composición relativa; y **ningún** resultado autoriza a decir que un anuncio "funciona mejor".
+`scripts/analyze_contrasts.py --test --n-perm 10000` — permutación bilateral con
+**Freedman–Lane** (residuos permutados para que el ajuste por duración sea válido) y
+**Holm–Bonferroni** dentro de cada contraste (7 redes).
 
-## 6. Límites (además de los de A1)
+### RÁPIDO vs LENTO (n=8 vs 21)
+
+| red | efecto (pp) | p cruda | p \| duración | **p Holm** | sig. |
+|---|---|---|---|---|---|
+| **DorsAttn** | **+5.3** | 0.0027 | **0.0004** | **0.0028** | **sí** |
+| SomMot | −3.5 | 0.0132 | 0.0129 | 0.0774 | no |
+| Default | −2.8 | 0.1012 | 0.0977 | 0.4885 | no |
+| Vis | +3.3 | 0.4089 | 0.4130 | 0.8259 | no |
+| Limbic / Cont / SalVentAttn | −1.7 / −1.2 / +0.5 | ≥0.12 | ≥0.12 | ≥0.49 | no |
+
+**DorsAttn sobrevive a la corrección por multiplicidad.** Y el p *baja* al ajustar por
+duración (0.0027 → 0.0004): la duración explicaba varianza irrelevante, así que removerla
+deja el efecto de grupo **más** nítido. Esto cierra el confusor que en A1 era una objeción.
+
+### CON CARAS vs SIN CARAS (n=21 vs 8)
+
+| red | efecto (pp) | p cruda | p \| duración | **p Holm** | sig. |
+|---|---|---|---|---|---|
+| Vis | +8.6 | 0.0152 | 0.0199 | 0.1211 | **no** |
+| Cont | −2.3 | 0.0164 | 0.0173 | 0.1211 | **no** |
+| Limbic | −2.1 | 0.0742 | 0.0538 | 0.2690 | no |
+
+El Δ de Vis era el más grande del corpus, pero **no sobrevive a Holm** con n=8 en el grupo
+control. Confirma la lectura de §3: **atractivo, no concluyente**.
+
+## 6. Veredicto honesto
+
+- **Un resultado pasa a ser formalmente defendible:** en anuncios de corte rápido, la
+  composición de la red **DorsAttn** es +5.3 pp mayor (21.6 % vs 16.2 % del total), significativo
+  tras corregir por multiplicidad **y** robusto al control de duración.
+- **El contraste de caras queda descartado** por ahora (no sobrevive a Holm).
+- Sigue sin autorizar ninguna afirmación de negocio: son **shares en unidades crudas sin
+  calibrar**, y significativo no es lo mismo que relevante.
+
+## 7. Límites (además de los de A1)
 
 1. **Predictor con error de medida:** `ritmo` y `hay_caras` son juicios del VLM sobre 12 frames,
    no anotación humana. Un predictor ruidoso **atenúa** los efectos (sesgo hacia cero) — los Δ
    observados son, si acaso, conservadores.
 2. **Una sola marca (Telcel):** todos comparten identidad de marca, logo y tono; falta replicar
    en otra categoría.
-3. **Sin test de significancia ni multiplicidad:** 14 comparaciones; el "mejor" hallazgo podría
-   ser el más favorecido por el azar. Es el siguiente paso formal.
+3. **Corrección por multiplicidad dentro de cada contraste, no entre contrastes:** Holm cubre las
+   7 redes, pero los 2 contrastes no se corrigen entre sí (con 2 familias, el efecto sería menor).
 4. **Shares, no magnitudes:** un cambio de share puede deberse a cambios en las otras redes.
 
-## 7. Siguiente paso
+## 8. Siguiente paso
 
-1. **Test formal con corrección por multiplicidad** (permutación por bloques ya disponible en
-   `service/metrics/stats.py`) y **n≥20 por lado** en el contraste de caras.
+1. ✅ **Test formal con corrección por multiplicidad — hecho** (§5). El hallazgo de ritmo pasa;
+   el de caras no (necesita **n≥20 por lado** antes de reintentarlo).
 2. **Replicar en una segunda marca/categoría** para descartar que sea un artefacto de Telcel.
-3. Solo entonces tiene sentido hablar de señal de producto — y la **calibración** (resultado real)
+3. **Anotación humana de `ritmo`** en una submuestra para estimar la atenuación por error de
+   medida del predictor del VLM.
+4. Solo entonces tiene sentido hablar de señal de producto — y la **calibración** (resultado real)
    sigue siendo el paso que convierte esto en algo vendible.
