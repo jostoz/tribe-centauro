@@ -18,6 +18,7 @@ from service.metrics.stats import (
     group_permutation_test,
     holm_bonferroni,
     paired_block_permutation,
+    paired_permutation_test,
 )
 
 ATLAS_DIR = "data/atlas/schaefer200"
@@ -187,3 +188,40 @@ def test_group_permutation_adjusts_for_correlated_covariate():
     assert unadjusted.p_values[0] < 0.05, "el confusor debería dar un falso positivo"
     assert adjusted.p_values[0] > 0.05, "al ajustar, el efecto de grupo debe desaparecer"
     assert adjusted.adjusted_for == "duration"
+
+
+# --- diseno pareado (duracion emparejada por diseno) -------------------------
+
+
+def test_paired_test_detects_what_unpaired_cannot():
+    """Con mucha varianza ENTRE pares, el test pareado ve el efecto y el no pareado no.
+
+    Es la razon del diseno de pares emparejados por duracion: cada anuncio es su propio control.
+    """
+    rng = np.random.default_rng(0)
+    n = 12
+    offsets = rng.normal(0, 10, size=(n, 1))  # varianza entre pares enorme
+    delta = 1.0
+    a = offsets + delta / 2 + rng.normal(0, 0.2, size=(n, 1))
+    b = offsets - delta / 2 + rng.normal(0, 0.2, size=(n, 1))
+
+    paired = paired_permutation_test(a, b, n_permutations=2000, seed=0)
+    unpaired = group_permutation_test(
+        np.vstack([a, b]), np.array([True] * n + [False] * n), n_permutations=2000, seed=0
+    )
+
+    assert paired.p_values[0] < 0.01, "el pareado debe ver el efecto intra-par"
+    assert unpaired.p_values[0] > 0.05, "el no pareado se lo pierde entre la varianza de pares"
+
+
+def test_paired_test_does_not_invent_an_effect():
+    rng = np.random.default_rng(1)
+    a = rng.normal(0, 1, size=(15, 1))
+    b = rng.normal(0, 1, size=(15, 1))
+
+    assert paired_permutation_test(a, b, n_permutations=2000, seed=0).p_values[0] > 0.05
+
+
+def test_paired_test_requires_matching_shapes():
+    with pytest.raises(ValueError):
+        paired_permutation_test(np.zeros((3, 2)), np.zeros((4, 2)))

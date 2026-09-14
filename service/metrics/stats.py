@@ -322,6 +322,51 @@ def group_permutation_test(
     )
 
 
+def paired_permutation_test(
+    values_a: np.ndarray,
+    values_b: np.ndarray,
+    n_permutations: int = 10000,
+    seed: int = 0,
+) -> GroupTestResult:
+    """Permutación bilateral para datos **pareados** (permutación de signos).
+
+    ``values_a`` y ``values_b`` son ``(n_pares, n_units)``. El estadístico es la media de la
+    diferencia intra-par ``a − b`` por unidad; bajo H0 el signo de cada diferencia es
+    intercambiable, así que se permutan los signos (test de permutación de signos).
+
+    Es la prueba correcta cuando el emparejamiento es **por diseño** (p. ej. duración idéntica):
+    usa la correlación intra-par en vez de tratarla como ruido, así que tiene más potencia que el
+    test de grupos independientes con la misma n, y el confusor emparejado queda controlado sin
+    covariables.
+    """
+    a = np.asarray(values_a, dtype=float)
+    b = np.asarray(values_b, dtype=float)
+    if a.shape != b.shape:
+        raise ValueError(f"los pares deben tener la misma forma: {a.shape} vs {b.shape}")
+    if a.ndim == 1:
+        a, b = a[:, None], b[:, None]
+
+    diff = a - b                      # (n_pares, n_units)
+    stat_obs = diff.mean(axis=0)
+    n_pairs = diff.shape[0]
+
+    rng = np.random.default_rng(seed)
+    count = np.zeros(diff.shape[1], dtype=int)
+    for _ in range(n_permutations):
+        signs = rng.choice((-1.0, 1.0), size=(n_pairs, 1))
+        count += np.abs((diff * signs).mean(axis=0)) >= np.abs(stat_obs)
+
+    p = (1.0 + count) / (1.0 + n_permutations)
+    return GroupTestResult(
+        statistic=stat_obs,
+        p_values=p,
+        n_a=n_pairs,
+        n_b=n_pairs,
+        n_permutations=n_permutations,
+        adjusted_for="emparejado por diseño",
+    )
+
+
 def holm_bonferroni(p_values: np.ndarray) -> np.ndarray:
     """p-valores ajustados por Holm–Bonferroni, en el orden original.
 
