@@ -60,7 +60,13 @@ Aplica la skill `centauro-gpu-inference` (num_workers=0, una inferencia a la vez
 
 Flags: `--workers N` (descargas en paralelo, def. 4), `--vlm-batch N` (anuncios por
 forward del VLM, def. 2), `--frames N` (def. 12), `--qwen-model`, `--whisper-model`,
+`--urls-file` (una URL por línea, para corpus grandes), `--corpus` (etiqueta del conjunto),
 `--language`, `--no-transcribe`, `--no-understand`, `--neural`, `--no-cache`.
+
+⚠️ **`--language` por defecto es `spanish`.** Para corpus en otro idioma (p. ej. LAMBDA, que es
+inglés) hay que pasar `--language ""` para que Whisper **autodetecte**; si no, transcribe el audio
+extranjero forzado a español. Ojo: el idioma entra en la clave de caché, así que cambiarlo
+invalida los transcripts previos y los recalcula.
 
 Mover la caché de modelos a otro disco (evita llenar C:):
 ```bash
