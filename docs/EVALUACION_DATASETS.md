@@ -44,27 +44,58 @@ Description, Emotions, Number, Photography Style, Tags, Text Shown, Tone, Visual
 | **Potencia** | `Pace`: **high 94 · medium 716 · low 1 373** → el contraste rápido vs lento pasa de 8 vs 20 a **94 vs 1 373**. Con n=1 373, el error de una correlación de rangos baja a **±0.027** (hoy ±0.19) |
 | **Predictor** | `Pace` está **anotado**, no inferido por un VLM → desaparece el error de medida que atenúa |
 | **Resultado** | **`recall_score` de 1 749 participantes** → primer test real de *"¿nuestro perfil predice algo humano?"* |
-| Voz vs música (que no pudimos construir) | campo `Audio` — **1 235/2 183 (57 %)** con valor no vacío |
+| Transcripciones ya hechas | el campo `Audio` **es la transcripción** (texto hablado, ~321 caracteres) en **1 235/2 183 (57 %)** → se puede **saltar Whisper** en esos anuncios |
 | Confusores | `Duration`, `Brand`, `Orientation` → emparejamiento por diseño, no covariable |
 | Pacing objetivo cruzado | media de escenas: **high 9.69 · medium 9.29 · low 7.19** → valida que `Pace` significa lo que dice |
 
+### ⚠️ Lo que medimos ANTES de gastar GPU (y obliga a corregir el diseño)
+
+Analizando las anotaciones contra `recall_score` (gratis, sin modelo — `scripts/analyze_lambda_annotations.py`):
+
+| anotación | efecto sobre memorabilidad |
+|---|---|
+| **`Brand`** | **η² = 0,226** ← el 22,6 % de la varianza (Netflix 0,887 vs Sherwin-Williams 0,431) |
+| `n_scenes` | ρ = +0,155 |
+| `scenes_per_s` | ρ = +0,072 |
+| `photo_style` | η² = 0,044 |
+| `duration` | ρ = 0,017 (ns) |
+| **`Pace`** | **η² = 0,012** (y no monótono: low 0,589 · medium 0,654 · high 0,610) |
+| `orientation` / `tone` / `human_present` / `complexity` / `has_transcript` | ≤ 0,009 |
+
+**Dos consecuencias duras:**
+
+1. **Las anotaciones humanas apenas predicen memorabilidad.** El mejor predictor de contenido es
+   `n_scenes` con ρ = 0,155 (**2,4 % de varianza**). Si propiedades que un humano anota no explican
+   la memorabilidad, esperar que un modelo cerebral la extraiga del video es una expectativa muy
+   optimista — hay que decirlo antes de vender nada.
+2. **La marca domina y era un confusor abierto.** El primer diseño de pares emparejó **solo por
+   duración**: **0 de 41 pares compartían marca**. Con 22,6 % de varianza explicada por marca, ese
+   diseño habría comparado estilos de marca, no ritmo. Corregido: **19 pares emparejados por marca
+   Y duración (±2 s)**, 13 marcas.
+
 ### Límites medidos (no de folleto)
 
-1. **Link rot: 11/15 vivos = 73 %.** Muestra aleatoria de 15 `youtube_id`: 4 caídos (uno privado).
-   Corpus usable ≈ **1 600 anuncios**. Sigue siendo 26× lo que tenemos.
-2. **`Scenes` está censurado a 10** (verificado: máximo = 10, media 8,0). Sirve para *validar*
-   `Pace`, **no** como medida fina de pacing.
-3. **`Audio` vacío en el 43 %** de los anuncios.
+1. **Link rot ~30 %.** Medido en dos muestras: 11/15 (73 % vivos, muestra pequeña) y **288/414
+   (70 %) sobre el diseño grande**. Corpus usable ≈ **1 500–1 600 anuncios** (26× lo actual).
+   Además, de los ads que faltaban para los pares por marca, **12/31 estaban caídos**.
+2. **`Scenes` está censurado a 10**: **1 151 anuncios tienen exactamente 10** escenas. Valida que
+   `Pace` significa lo que dice, pero **no** sirve como medida fina de pacing.
+3. **`Audio` es la transcripción, no un tipo de audio**: presente en 1 235/2 183 (57 %). Donde
+   existe, **ahorra Whisper**; donde no, hay que transcribir (43 %).
 4. **`recall_score` es memorabilidad, no rendimiento de campaña.** Es un outcome humano, no CTR:
    **no sustituye la calibración** de negocio.
+5. **Solo 19 pares cumplen marca + duración** en la parte ya descargada. El emparejamiento estricto
+   (marca y duración) es lo correcto pero **reduce mucho el n**: pagar 1,3 h de GPU da 19 pares
+   válidos, no 41 confundidos.
 
 ### Coste de adopción
 
 | Etapa | Qué | GPU | Coste |
 |---|---|---|---|
-| 1 | contenido (ASR+VLM+stats) de una **submuestra estratificada** (~400: todos los `high` + 150 `medium` + 150 `low`) | ~3 h | ~$3 |
-| 2 | **neural** de esa submuestra | ~20 h | ~$16 |
-| 3 | corpus completo (~1 600 usables) | ~80 h | ~$65 |
+| **0 (esta)** | **19 pares marca+duración** (38 ads), con patrón por vértice | **1,3 h** | **$0,5** |
+| 1 | readout multivariado sobre esos mismos patrones | ~2 min | ~$0 |
+| 2 | ampliar a más pares marca+duración (requiere descargar más anuncios vivos) | ~5–10 h | ~$2–4 |
+| 3 | corpus completo (~1 500 usables) para la **biblioteca**, no para validar | ~77 h | ~$27 (10 h en 8 GPUs) |
 
 ## 3. Algonauts 2025 / CNeuroMod — validar el *modelo* contra cerebros reales
 
