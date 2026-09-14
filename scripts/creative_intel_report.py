@@ -106,7 +106,8 @@ def seccion_c(con, corpus: list) -> dict:
     return out
 
 
-def seccion_d() -> dict:
+def ladda_frame() -> pd.DataFrame:
+    """Anotaciones de LAMBDA normalizadas, una fila por anuncio."""
     files = [f["path"] for f in json.load(urllib.request.urlopen(_API))]
     df = pd.concat([
         pd.read_parquet(io.BytesIO(urllib.request.urlopen(f"{_BASE}/{f}").read())) for f in files
@@ -125,6 +126,11 @@ def seccion_d() -> dict:
         except Exception:  # noqa: BLE001
             return 0
     d["n_scenes"] = ad["Scenes"].apply(nsc)
+    return d
+
+
+def seccion_d(frame: pd.DataFrame) -> dict:
+    d = frame
     return {
         "n": len(d),
         "n_marcas": d["brand"].nunique(),
@@ -136,6 +142,30 @@ def seccion_d() -> dict:
         "escenas_max": int(d["n_scenes"].max()),
         "marcas_top": d["brand"].value_counts().head(8).to_dict(),
     }
+
+
+def seccion_d_marcas(frame: pd.DataFrame, min_ads: int = 12) -> list:
+    """Tabla multi-marca desde anotación HUMANA: ritmo, duración, escenas y memorabilidad.
+
+    Es la expansión a muchas marcas **sin raspar YouTube y sin GPU**: LAMBDA trae 263 marcas
+    anotadas por humanos, mejores etiquetas que las del VLM.
+    """
+    out = []
+    for marca, g in frame.groupby("brand"):
+        if len(g) < min_ads:
+            continue
+        paces = g["pace"].value_counts()
+        out.append({
+            "marca": marca,
+            "n": len(g),
+            "pct_rapido": round(100 * paces.get("high", 0) / len(g)),
+            "pct_medio": round(100 * paces.get("medium", 0) / len(g)),
+            "pct_lento": round(100 * paces.get("low", 0) / len(g)),
+            "dur_mediana": int(g["dur"].median()),
+            "escenas_medias": round(float(g["n_scenes"].mean()), 2),
+            "recall_medio": round(float(g["recall"].mean()), 3),
+        })
+    return sorted(out, key=lambda r: -r["n"])
 
 
 def seccion_e(a: dict, d: dict) -> dict:
@@ -155,7 +185,9 @@ def main() -> int:
     a = seccion_a(con, corpus)
     b = seccion_b(con, corpus)
     c = seccion_c(con, corpus)
-    d = seccion_d()
+    frame = ladda_frame()
+    d = seccion_d(frame)
+    marcas = seccion_d_marcas(frame, min_ads=12)
     e = seccion_e(a, d)
 
     print("=== A. INVENTARIO CREATIVO ===")
@@ -183,13 +215,21 @@ def main() -> int:
     print(f"escenas: media {d['escenas_medias']} (máx {d['escenas_max']} → CENSURADO)")
     print(f"marcas top: {d['marcas_top']}")
 
+    print(f"\n=== D2. PERFIL POR MARCA (anotación HUMANA, >=12 anuncios) ===")
+    print(f"marcas con >=12 anuncios: {len(marcas)}")
+    print(f"{'marca':22} {'n':>4} {'rápido%':>8} {'medio%':>7} {'lento%':>7} {'dur':>5} {'escenas':>8} {'recall':>7}")
+    for r in marcas[:20]:
+        print(f"{r['marca'][:22]:22} {r['n']:>4} {r['pct_rapido']:>8} {r['pct_medio']:>7} "
+              f"{r['pct_lento']:>7} {r['dur_mediana']:>5} {r['escenas_medias']:>8} {r['recall_medio']:>7}")
+
     print("\n=== E. DURACIÓN vs BENCHMARK ===")
     print(json.dumps(e, ensure_ascii=False))
 
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / "creative_intel.json").write_text(
         json.dumps({"A_inventario": a, "B_perfil": b, "C_publico": c,
-                    "D_benchmark": d, "E_duracion": e}, ensure_ascii=False, indent=2),
+                    "D_benchmark": d, "D2_marcas": marcas, "E_duracion": e},
+                   ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
     print(f"\nguardado: {OUT / 'creative_intel.json'}")

@@ -102,6 +102,48 @@ pequeños. **Este bloque sirve para detectar casos extremos, no para comparar ma
 | **Ritmo (etiqueta humana)** | **η² = 0,012** | prácticamente nada |
 | Orientación · tono · personas · complejidad visual | ≤ 0,009 | — |
 
+## 5b. Benchmark multi-marca — **40 marcas** con anotación humana
+
+Mismo corpus LAMBDA, agregado por marca (≥12 anuncios). **Anotación humana**, no modelo:
+ritmo, duración, nº de escenas y **memorabilidad** (1 749 participantes).
+
+| marca | n | rápido % | medio % | lento % | dur med. | escenas | memoria |
+|---|---|---|---|---|---|---|---|
+| Netflix | 121 | 0 | 26 | 74 | 40 s | 8,93 | **0,887** |
+| Walt-Disney | 89 | 3 | 65 | 31 | 30 s | 9,73 | 0,792 |
+| Ulta Beauty | 78 | 3 | 19 | 78 | 30 s | 7,94 | 0,562 |
+| Viacom | 69 | 0 | 13 | 87 | 25 s | 8,84 | 0,641 |
+| Adobe | 63 | 0 | 22 | 78 | 48 s | 8,75 | 0,808 |
+| Costco | 53 | 0 | 13 | 87 | 44 s | 7,32 | 0,464 |
+| Nvidia | 45 | 2 | 47 | 51 | 36 s | 8,24 | 0,770 |
+| Sherwin-Williams | 45 | 0 | 7 | 93 | 31 s | 6,80 | **0,431** |
+| Uber | 38 | 5 | 55 | 39 | 41 s | 8,74 | 0,838 |
+| Amazon | 36 | 0 | 14 | 86 | 30 s | 4,97 | 0,774 |
+| Esteelauder | 35 | 0 | 66 | 34 | 25 s | 8,17 | 0,414 |
+| Clorox | 34 | **15** | 24 | 62 | 15 s | 7,00 | 0,492 |
+| Dick's Sporting Goods | 34 | **12** | 24 | 65 | 32 s | 7,91 | 0,761 |
+| Ralphlauren | 25 | **12** | 48 | 40 | 30 s | 9,12 | 0,592 |
+| … (40 marcas en `data/reports/creative_intel.json`) | | | | | | | |
+
+**Observaciones:**
+
+1. **El ritmo rápido es minoritario en todas las marcas.** La mayoría está en **0 %**; solo Clorox
+   (15 %), Dick's (12 %) y Ralphlauren (12 %) destacan. Es decir: el corpus profesional no usa el
+   corte rápido como norma.
+2. **Las más memorables no son las más rápidas.** Redbull (0,958) usa **0 % rápido** y solo
+   3,9 escenas; Netflix (0,887) tiene **74 % lento**. Los extremos se explican mejor por
+   **categoría y familiaridad de marca** que por montaje.
+3. **Contraste de niveles de análisis — importante para no sobreinterpretar:**
+
+| nivel | asociación ritmo↔memorabilidad |
+|---|---|
+| **ad a ad** (n=2 183) | η² = **0,012** → nada |
+| **marca a marca** (n=40) | ρ = **+0,367**, p = 0,020 → pero **no sobrevive a Holm** (~0,08) y está confundido por categoría |
+
+→ La asociación existe **solo al agregar por marca**, es **débil**, **no pasa la corrección por
+multiplicidad** y probablemente refleja que las marcas de categorías más "entretenidas" usan algo
+más de ritmo rápido **y** son más recordadas. **No es una palanca que podamos vender.**
+
 ## 6. Lectura cruzada
 
 1. **Ambas marcas están en el formato correcto** (≈30 s, ritmo mayoritariamente lento-medio) y son
