@@ -47,8 +47,11 @@ de texto (`audio_only=False`), que depende de Llama-3.2 gated.
 2. **Ruta de video sin validar:** los anuncios visuales llevan su señal en el extractor
    de video, no probado aquí. Es la siguiente validación crítica.
 3. **Ruta de texto:** requiere token HuggingFace con acceso a Llama-3.2 (gated) + `gTTS`.
-4. **Alineación hemodinámica:** `metadata.alignment = "unverified"` — no interpretar
-   timesteps como segundos exactos hasta fijar la convención empíricamente.
+4. **Alineación hemodinámica: CERRADA.** `metadata.alignment = "stimulus-aligned"` —
+   `preds[k]` es la respuesta al segundo `k` del estímulo; el offset de 5 s ya lo aplica
+   el checkpoint. Verificado empíricamente sobre 4 anuncios reales con dos métodos
+   independientes: `docs/FASE_0.5_ALINEACION.md`. Precisión de la localización absoluta:
+   ≈ ±1.5 s (no sub-segundo).
 
 ## Siguiente paso
 

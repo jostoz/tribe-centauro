@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from core.ordering import FSAAVERAGE5_VERTICES
+from core.ordering import ALIGNMENT_CONVENTION, FSAAVERAGE5_VERTICES
 from core.tribe_model import TribePredictor
 from service.errors import InvalidInput, MediaUnsupported, ModelUnavailable
 
@@ -95,7 +95,7 @@ def test_metadata_declares_temporal_conventions(predictor, video_file):
     assert meta["tr_seconds"] == 1.0
     assert meta["hemodynamic_offset_seconds"] == 5.0
     assert meta["mesh"] == "fsaverage5"
-    assert meta["alignment"] == "unverified"
+    assert meta["alignment"] == ALIGNMENT_CONVENTION
 
 
 def test_zero_sources_is_rejected(predictor):

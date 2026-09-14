@@ -29,6 +29,7 @@ from typing import Any, Dict, Optional, Tuple
 import numpy as np
 
 from core.ordering import (
+    ALIGNMENT_CONVENTION,
     FSAAVERAGE5_VERTICES,
     HEMODYNAMIC_OFFSET_SECONDS,
     TR_SECONDS,
@@ -152,7 +153,7 @@ class TribePredictor:
             "segments": _segments_summary(segments),
             "tr_seconds": TR_SECONDS,
             "hemodynamic_offset_seconds": HEMODYNAMIC_OFFSET_SECONDS,
-            "alignment": "unverified",
+            "alignment": ALIGNMENT_CONVENTION,
             "mesh": "fsaverage5",
             "model_version": self.model_version,
             "device": self.device,

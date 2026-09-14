@@ -50,6 +50,10 @@ class Provenance:
 
     Se adjunta SIEMPRE a las respuestas. Sin esto, un agente no puede distinguir una
     medición de una estimación no validada.
+
+    ``hemodynamic_offset_seconds`` es el retardo que el checkpoint **ya aplicó** al
+    construir su objetivo de entrenamiento: ``preds[k]`` es la respuesta al segundo ``k``
+    del estímulo (``core.ordering.ALIGNMENT_CONVENTION``). No hay que restarlo.
     """
 
     units: str = "raw_model_activation"

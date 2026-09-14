@@ -64,11 +64,13 @@ Restricciones operativas que impactan el servicio:
 - **Texto ⇒ red**: `TextToEvents` usa `gTTS` + `langdetect` (Google TTS) en tiempo de inferencia.
 - **Llama-3.2 es gated**: se requiere token HF con acceso aprobado para las features de texto.
 - **`ChunkEvents(max_duration=60, min_duration=30)`**: los estímulos se trocean en bloques de 30–60 s.
-  Comportamiento con anuncios de 6–15 s **no verificado** → debe validarse (Fase 0.5).
+  Comportamiento con anuncios de 6–15 s **verificado**: no se descartan (`docs/FASE_0.5_VEREDICTO.md`).
 - **`RemoveMissing()` + `AddSentenceToWords(max_unmatched_ratio=0.05)`**: un anuncio sin voz puede
-  perder eventos → hay que probar un anuncio mudo.
-- **Desalineación hemodinámica**: offset de 5 s en el pasado. La convención exacta de alineación
-  debe fijarse empíricamente y declararse en cada respuesta.
+  perder eventos → **verificado**: la ruta `audio_only` produce inferencia válida en mudo.
+- **Offset hemodinámico de 5 s**: **ya lo aplica el checkpoint**, no el consumidor.
+  `preds[k]` es la respuesta al segundo `k` del estímulo (`alignment = "stimulus-aligned"`,
+  verificado empíricamente — `docs/FASE_0.5_ALINEACION.md`). Precisión de la localización
+  absoluta: ≈ ±1.5 s.
 
 ---
 
@@ -130,7 +132,7 @@ Principio: **barato y síncrono por defecto; caro y asíncrono con handle.** Nun
 | `cancel_job(job_id)` | puro | Cancela encolado o en ejecución |
 | `get_creative_report(ad_id, detail?)` | puro | Resumen **acotado** + URIs de recursos. `detail=summary\|standard` |
 | `get_attention_timeline(ad_id, max_points=120, align="stimulus")` | puro | Serie temporal diezmada, alineada al estímulo |
-| `get_editing_suggestions(ad_id, platform, max_suggestions=5)` | puro | Rangos temporales `[t0,t1]` **corregidos por lag** + acción |
+| `get_editing_suggestions(ad_id, platform, max_suggestions=5)` | puro | Rangos temporales `[t0,t1]` en segundos del estímulo + acción |
 | `compare_creatives(ad_ids[], metric, design)` | puro / derivado | Estadística honesta (pareada + corrección por clúster) |
 | `rank_creatives(items[], platform)` | asíncrono si ≥2 sin analizar | Ranking ordenado + justificación |
 | `render_brain_map(ad_id, t, view, format)` | asíncrono | Devuelve **content block de imagen** |
@@ -335,8 +337,9 @@ puntos de entrada ejecutan sin excepción; `numpy.int64` ausente de todo payload
 ### Fase 0.5 — Validación de supuestos del modelo
 Clip de 6 s / 15 s / mudo / sin voz / solo texto. Fijar: comportamiento de `ChunkEvents` con
 anuncios cortos, alineación hemodinámica real, si un anuncio mudo pierde eventos.
-**Aceptación:** documento `docs/model-conventions.md` con la convención de alineación verificada
-empíricamente y el tamaño de chunk observado por duración.
+**Aceptación:** convención de alineación verificada empíricamente y tamaño de chunk observado
+por duración. **Entregado:** `docs/FASE_0.5_VEREDICTO.md` (chunks y mudo) y
+`docs/FASE_0.5_ALINEACION.md` (alineación, con `scripts/validate_alignment.py` reproducible).
 
 ### Fase 1 — MCP local (stdio)
 `get_service_capabilities`, `get_platform_spec`, `validate_creative`, resources de specs/schemas/terms, prompts.

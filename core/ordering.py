@@ -25,11 +25,33 @@ TR_SECONDS = 1.0
 """TRIBE v2 predice a 1 TR = 1 segundo (confirmado en el notebook oficial)."""
 
 HEMODYNAMIC_OFFSET_SECONDS = 5.0
-"""Las predicciones se desplazan 5 s al pasado para compensar el retraso hemodinámico.
+"""Retardo hemodinámico que el checkpoint **ya compensa** al construir su objetivo.
 
-La convención exacta (si el array devuelto ya está alineado al onset del estímulo)
-debe fijarse empíricamente en Fase 0.5 contra el ejemplo del notebook oficial.
-NO asumir alineación hasta verificarlo.
+El config del checkpoint (``cache/checkpoint/facebook__tribev2/config.yaml``) declara
+``offset: 5.0`` en el extractor de fMRI. Ese ``offset`` re-declara la serie de BOLD
+empezando en ``-offset``, así que la ventana de estímulo ``[s, s+D]`` se aparea con las
+muestras de BOLD crudo ``[s+5, s+5+D]``: el modelo aprende ``estímulo(t) -> BOLD(t+5)``,
+que es la respuesta al estímulo del segundo ``t``.
+
+Consecuencia: este número es un desplazamiento **ya aplicado**. NO hay que restarlo al
+leer ``preds``. Ver :data:`ALIGNMENT_CONVENTION`.
+"""
+
+ALIGNMENT_CONVENTION = "stimulus-aligned"
+"""``preds[k]`` es la respuesta al segundo ``k`` del estímulo (no BOLD del instante k).
+
+Verificado empíricamente el 2026-09-13 con ``scripts/validate_alignment.py`` sobre 4
+anuncios reales y 12 escalones "mutear desde m". El borde de la respuesta sigue al onset
+del estímulo con ``edge = -1.48 + 1.023·m`` (residuo RMS 0.45 TR). Calibrando el mismo
+estimador sobre las dos hipótesis simuladas con la HRF canónica, devuelve α = 0.0 TR para
+"alineado al estímulo" y α = +5.0 TR para "BOLD crudo": la α observada queda a 1.5 TR de
+la primera y a 6.5 TR de la segunda. Método independiente (envelope tracking entre la
+envolvente RMS de 1 Hz y la ROI más variable): lag mediano +0.5 TR, r mediano 0.56.
+
+Precisión real de la localización absoluta: ≈1.5 s (el borde del escalón aparece ~1.5 TR
+antes de ``m``; causa no determinada, candidato: la ventana de contexto del extractor de
+audio, que ve audio posterior al TR predicho). Es un sesgo de ~1.5 s sobre una rejilla de
+1 TR — no afecta a la conclusión, que separa 0 s de 5 s.
 """
 
 

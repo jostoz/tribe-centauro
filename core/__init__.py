@@ -3,6 +3,7 @@ Core — inferencia TRIBE v2 y convenciones de la malla cortical.
 """
 
 from core.ordering import (
+    ALIGNMENT_CONVENTION,
     FSAAVERAGE5_VERTICES,
     FSAAVERAGE5_VERTICES_PER_HEMI,
     HEMODYNAMIC_OFFSET_SECONDS,
@@ -13,6 +14,7 @@ from core.ordering import (
 from core.tribe_model import TribePredictor
 
 __all__ = [
+    "ALIGNMENT_CONVENTION",
     "FSAAVERAGE5_VERTICES",
     "FSAAVERAGE5_VERTICES_PER_HEMI",
     "HEMODYNAMIC_OFFSET_SECONDS",

@@ -37,7 +37,7 @@ from api.schemas import (
     ValidateResponse,
     ValidationIssue,
 )
-from core.ordering import FSAAVERAGE5_VERTICES
+from core.ordering import ALIGNMENT_CONVENTION, FSAAVERAGE5_VERTICES
 from core.tribe_model import TribePredictor
 from service.errors import AdsServiceError, InvalidInput, LicenseRequired
 from service.metrics.engagement import (
@@ -179,10 +179,10 @@ async def analyze_ad(request: AnalyzeRequest):
         )
 
     warnings = []
-    if metadata.get("alignment") == "unverified":
+    if metadata.get("alignment") != ALIGNMENT_CONVENTION:
         warnings.append(
-            "La alineación respecto al onset del estímulo no está verificada "
-            "(offset hemodinámico de 5 s). No interpretar timesteps como segundos exactos."
+            "La alineación temporal no está verificada en esta corrida: no interpretar "
+            "los timesteps como segundos del estímulo."
         )
     if metadata.get("n_segments") and metadata["n_segments"] > 1:
         warnings.append(
