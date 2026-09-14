@@ -35,7 +35,7 @@ def _plain(s) -> str:
     )
 
 
-def load_rows(con, corpus: str | None = None) -> list:
+def _rows_for(con, corpus: str | None) -> list:
     rows = []
     for a in store.all_ads(con, corpus):
         neu = a.get("neural") or {}
@@ -56,6 +56,16 @@ def load_rows(con, corpus: str | None = None) -> list:
     return rows
 
 
+def load_rows(con, corpus: str | None = None) -> list:
+    """Anuncios con perfil neural. ``corpus`` admite varios separados por coma (agrupado)."""
+    if corpus and "," in corpus:
+        out: list = []
+        for c in corpus.split(","):
+            out.extend(_rows_for(con, c.strip()))
+        return out
+    return _rows_for(con, corpus)
+
+
 def _mean(rows) -> np.ndarray:
     return np.mean([r["share"] for r in rows], axis=0)
 
@@ -71,9 +81,11 @@ def _contrast(label: str, a: list, b: list, name_a: str, name_b: str) -> None:
     print(f"  duración mediana: {med_a:.0f}s vs {med_b:.0f}s")
 
 
-def _adjusted(rows: list, label: str, is_a) -> None:
-    """Coeficiente de la dummy del grupo, con la duración como covariable."""
-    x = np.array([[1.0, 1.0 if is_a(r) else 0.0, r["dur"]] for r in rows])
+def _adjusted(rows_a: list, rows_b: list, label: str) -> None:
+    """Coeficiente del grupo con la duración como covariable, solo entre los dos grupos."""
+    rows = rows_a + rows_b
+    dummy = [1.0] * len(rows_a) + [0.0] * len(rows_b)
+    x = np.array([[1.0, d, r["dur"]] for d, r in zip(dummy, rows)])
     y = np.array([r["share"] for r in rows])
     beta, *_ = np.linalg.lstsq(x, y, rcond=None)
     print(f"\n{label}: efecto ajustado por duración (pp)")
@@ -81,10 +93,15 @@ def _adjusted(rows: list, label: str, is_a) -> None:
         print(f"  {k:11} {beta[1][i]*100:+6.1f}")
 
 
-def _formal(rows: list, label: str, is_a, n_perm: int, seed: int) -> None:
-    """Test de permutación bilateral por red, con y sin ajuste por duración, + Holm."""
+def _formal(rows_a: list, rows_b: list, label: str, n_perm: int, seed: int) -> None:
+    """Test de permutación bilateral entre DOS grupos explícitos, + Holm.
+
+    Usa exactamente los mismos grupos que la parte descriptiva (p. ej. rápido vs lento).
+    Meter los de ritmo intermedio en el control *atenúa* el efecto y sesga el test.
+    """
+    rows = rows_a + rows_b
     values = np.array([r["share"] for r in rows])
-    labels = np.array([bool(is_a(r)) for r in rows])
+    labels = np.array([True] * len(rows_a) + [False] * len(rows_b))
     dur = np.array([r["dur"] for r in rows])
 
     unadj = group_permutation_test(values, labels, n_permutations=n_perm, seed=seed)
@@ -134,19 +151,17 @@ def main() -> int:
     slow = [r for r in rows if r["ritmo"] == "lento"]
     if len(fast) >= 2 and len(slow) >= 2:
         _contrast("RÁPIDO vs LENTO", fast, slow, "rápido", "lento")
-        _adjusted(rows, "RÁPIDO vs LENTO", lambda r: r["ritmo"] == "rapido")
+        _adjusted(fast, slow, "RÁPIDO vs LENTO")
         if args.test:
-            _formal(rows, "RÁPIDO vs LENTO", lambda r: r["ritmo"] == "rapido",
-                    args.n_perm, args.seed)
+            _formal(fast, slow, "RÁPIDO vs LENTO", args.n_perm, args.seed)
 
     with_f = [r for r in rows if r["caras"]]
     without_f = [r for r in rows if not r["caras"]]
     if len(with_f) >= 2 and len(without_f) >= 2:
         _contrast("CON CARAS vs SIN CARAS", with_f, without_f, "con caras", "sin caras")
-        _adjusted(rows, "CON CARAS vs SIN CARAS", lambda r: r["caras"])
+        _adjusted(with_f, without_f, "CON CARAS vs SIN CARAS")
         if args.test:
-            _formal(rows, "CON CARAS vs SIN CARAS", lambda r: r["caras"],
-                    args.n_perm, args.seed)
+            _formal(with_f, without_f, "CON CARAS vs SIN CARAS", args.n_perm, args.seed)
 
     if args.test:
         print(

@@ -4,6 +4,15 @@
 **Reproducible:** `.venv/Scripts/python.exe scripts/analyze_contrasts.py`
 **Antecede:** [`GRUPO_A_RESULTADOS.md`](GRUPO_A_RESULTADOS.md) (n=15, contrastes infrapotenciados)
 
+> ## 🚨 DEGRADADO POR LA RÉPLICA (ver `REPLICA_COCACOLA.md`)
+> El hallazgo de este informe **no se confirmó en una segunda marca/categoría**: en Coca-Cola
+> la dirección se repite pero **no sobrevive a Holm** (+3.0 pp, p Holm 0.64). Queda como
+> **"dirección consistente, no confirmada"**, no como resultado defendible. Además, el test
+> formal de este informe metía los ritmos intermedios en el control (corrige a **+5.2 pp**,
+> Holm 0.0035 — sigue significativo en Telcel, pero era una inconsistencia de método).
+> Hoy el claim defendible es *"el análisis produce contrastes reproducibles y honestos"*,
+> **no** que el modelo detecte el ritmo de un anuncio.
+
 > Exploratorio en su origen, **con test formal en §5** (permutación + Holm). Los valores están
 > en **unidades crudas sin calibrar**: shares relativos de la composición por red. Significativo
 > **no** es relevante ni vendible — es dirección, no tamaño de efecto.
