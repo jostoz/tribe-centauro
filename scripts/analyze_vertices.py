@@ -34,15 +34,24 @@ from service.metrics.stats import holm_bonferroni  # noqa: E402
 VDIR = Path("data/discovery/vertices")
 
 
-def load_matrix(ids: list) -> tuple:
-    """Carga el patrón por vértice de cada id. Devuelve (X, ids_ok)."""
-    rows, ok = [], []
-    for i in ids:
-        p = VDIR / f"{i}.npy"
-        if p.exists():
-            rows.append(np.load(p).astype(np.float32))
-            ok.append(i)
-    return (np.vstack(rows) if rows else np.empty((0, 0))), ok
+def load_pairs(pairs: list) -> tuple:
+    """Carga por grupos, conservando **solo pares completos**. Devuelve matrices alineadas.
+
+    Cargar `hi_ids + lo_ids` de golpe y partir por la mitad se desalinea en cuanto falta un
+    patrón (caso real: 37 de 38), así que se empareja explícitamente.
+    """
+    hi, lo, rec_hi, rec_lo = [], [], [], []
+    for p in pairs:
+        fh = VDIR / f"{p['high']['id']}.npy"
+        fl = VDIR / f"{p['low']['id']}.npy"
+        if fh.exists() and fl.exists():
+            hi.append(np.load(fh).astype(np.float32))
+            lo.append(np.load(fl).astype(np.float32))
+            rec_hi.append(float(p["high"].get("recall") or 0.0))
+            rec_lo.append(float(p["low"].get("recall") or 0.0))
+    if not hi:
+        return np.empty((0, 0)), np.empty((0, 0)), np.array([])
+    return np.vstack(hi), np.vstack(lo), np.array(rec_hi + rec_lo)
 
 
 def pca(X: np.ndarray, k: int) -> tuple:
@@ -97,38 +106,32 @@ def main() -> int:
     args = ap.parse_args()
 
     pairs = json.loads(Path(args.pairs).read_text(encoding="utf-8"))
-    hi_ids = [p["high"]["id"] for p in pairs]
-    lo_ids = [p["low"]["id"] for p in pairs]
-    rec = {p["high"]["id"]: float(p["high"].get("recall") or 0) for p in pairs}
-    rec.update({p["low"]["id"]: float(p["low"].get("recall") or 0) for p in pairs})
-
-    Xu, ids_u = load_matrix(hi_ids + lo_ids)
-    if Xu.shape[0] < 8:
-        print(f"patrones por vértice disponibles: {Xu.shape[0]} — corre antes "
+    X_hi, X_lo, r = load_pairs(pairs)
+    n_pairs = X_hi.shape[0]
+    if n_pairs < 4:
+        print(f"pares con AMBOS patrones por vértice: {n_pairs} — corre antes "
               f"`--neural --vertices --no-cache` para generarlos.")
         return 1
-
-    n_units = Xu.shape[0]
-    n_pairs = n_units // 2
-    ids_hi, ids_lo = ids_u[:n_pairs], ids_u[n_pairs:]
-    X = np.vstack([Xu[:n_pairs], Xu[n_pairs:]])
+    X = np.vstack([X_hi, X_lo])
     y = np.array([1] * n_pairs + [0] * n_pairs)
-    print(f"ads con patrón: {n_units} ({n_pairs} pares) · features: {X.shape[1]} vértices")
+    k = min(args.k, X.shape[0] - 1)
+    print(f"pares: {n_pairs} ({X.shape[0]} ads) · {X.shape[1]} vértices · usando {k} componentes")
+    if k < args.k:
+        print(f"  (k limitado a n-1 = {k}: con {X.shape[0]} muestras no hay más componentes reales)")
 
-    comps, S = pca(X, args.k)
+    comps, S = pca(X, k)
     var = (S**2) / (S**2).sum()
-    print(f"varianza explicada por las {args.k} primeras componentes: {var.sum()*100:.1f} %")
 
     p = paired_intra_permutation(comps, n_pairs, args.n_perm, args.seed)
     p_holm = holm_bonferroni(p)
     print(f"\nPACE — test intra-par por componente (n_perm={args.n_perm})")
     print(f"  {'comp':>4} {'%var':>6} {'delta':>10} {'p cruda':>9} {'p Holm':>9}  sig")
-    for i in range(args.k):
+    for i in range(k):
         sig = "sí" if p_holm[i] < 0.05 else "no"
         print(f"  {i:>4} {var[i]*100:6.2f} {comps[:n_pairs,i].mean()-comps[n_pairs:,i].mean():10.4f} "
               f"{p[i]:9.4f} {p_holm[i]:9.4f}  {sig}")
 
-    acc = cv_accuracy(X, y, n_pairs, args.k, args.seed)
+    acc = cv_accuracy(X, y, n_pairs, k, args.seed)
     rng = np.random.default_rng(args.seed)
     null = []
     for _ in range(200):  # nulo por permutación intra-par
@@ -136,24 +139,23 @@ def main() -> int:
         flip = rng.random(n_pairs) < 0.5
         for j in np.flatnonzero(flip):
             y_perm[j], y_perm[j + n_pairs] = 0, 1
-        null.append(cv_accuracy(X, y_perm, n_pairs, args.k, args.seed))
+        null.append(cv_accuracy(X, y_perm, n_pairs, k, args.seed))
     p_acc = (1 + sum(a >= acc for a in null)) / (1 + len(null))
-    print(f"\nCLASIFICACIÓN high/low (CV dejando un par fuera, {args.k} comps): "
+    print(f"\nCLASIFICACIÓN high/low (CV dejando un par fuera, {k} comps): "
           f"bal-acc {acc:.2f} vs nulo {np.mean(null):.2f} ± {np.std(null):.2f} (p≈{p_acc:.3f})")
 
     try:
         from scipy import stats as sps
 
-        r = np.array([rec.get(i, np.nan) for i in ids_hi + ids_lo])
         print(f"\nRECALL (memorabilidad humana) vs componentes — Spearman (n={len(r)})")
         pv = []
-        for i in range(args.k):
+        for i in range(k):
             rho, pval = sps.spearmanr(comps[:, i], r)
             pv.append(pval)
             if pval < 0.05:
                 print(f"  comp {i:>3} (%var {var[i]*100:5.1f}) rho={rho:+.3f} p={pval:.4f}")
-        print(f"  componentes con p<0.05 sin corregir: {sum(1 for x in pv if x < 0.05)} de {args.k}"
-              f" (esperado por azar ≈ {args.k*0.05:.1f}) → p Holm mín = {holm_bonferroni(pv).min():.3f}")
+        print(f"  componentes con p<0.05 sin corregir: {sum(1 for x in pv if x < 0.05)} de {len(pv)}"
+              f" (esperado por azar ≈ {len(pv)*0.05:.1f}) → p Holm mín = {holm_bonferroni(pv).min():.3f}")
     except ImportError:
         print("\n(scipy no disponible: se omite recall)")
 

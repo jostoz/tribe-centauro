@@ -62,7 +62,7 @@ def main() -> int:
             lo.append(shares[lo_id])
             rec_hi.append(float(p["high"].get("recall") or 0.0))
             rec_lo.append(float(p["low"].get("recall") or 0.0))
-            durs.append(int(p["duration"]))
+            durs.append(int(p.get("duration") or p.get("duration_high") or 0))
             usados += [hi_id, lo_id]
 
     if len(hi) < 4:
