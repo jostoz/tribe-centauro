@@ -135,6 +135,11 @@ fallback es un forward extra, que es lo que separa x2.6 de x1.6.
 El pipeline captura **vistas, likes y comentarios públicos** de YouTube sin descargar el
 vídeo y los persiste en el store (columna `stats_updated_at`, TTL **24 h**).
 
+**Es predeterminado, no un paso opcional:** la descarga ya trae estas métricas y la **única
+vía de escritura** al store (`pipeline._upsert`) las persiste junto a la metadata, así que
+ningún camino (fetch / transcribe / understand / neural) puede olvidarse del enriquecimiento.
+Además, cada corrida refresca las que hayan superado el TTL.
+
 ```bash
 # Solo métricas públicas (red, sin GPU)
 .venv/Scripts/python.exe -m discovery.pipeline --stats-only

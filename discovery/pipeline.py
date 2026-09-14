@@ -62,9 +62,17 @@ def _set_hf_home() -> None:
 
 
 def _upsert(con, rec: dict) -> None:
+    """Única vía de escritura de un anuncio al store.
+
+    Persiste metadata + entidades y, si el registro trae métricas públicas (viene así de
+    la descarga), también las stats. Al centralizarlo aquí, ningún camino de escritura
+    (fetch, transcribe, understand, neural) puede olvidarse del enriquecimiento.
+    """
     u = rec.get("understanding")
     ents = entities.extract_entities(u) if u else None
     store.upsert_ad(con, rec, ents)
+    if rec.get("view_count") is not None or rec.get("like_count") is not None:
+        store.upsert_stats(con, rec)
 
 
 def _video_ok(a: dict) -> bool:
@@ -84,9 +92,7 @@ def phase_fetch(con, urls: List[str], workers: int) -> List[dict]:
     if to_download:
         print(f"[fetch] descargando {len(to_download)} en paralelo (workers={workers})...")
         for rec in fetch.download_many(to_download, workers=workers):
-            _upsert(con, rec)
-            if rec.get("view_count") is not None:
-                store.upsert_stats(con, rec)  # el propio download ya trae vistas/likes
+            _upsert(con, rec)  # metadata + stats públicas (vienen en el propio download)
     ads = [a for a in store.all_ads(con) if a.get("url") in set(urls)]
     return [a for a in ads if _video_ok(a)]
 

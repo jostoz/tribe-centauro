@@ -166,3 +166,37 @@ def test_upsert_stats_does_not_wipe_core_fields(tmp_path):
     got = store.get_ad(con, "A")
     assert got["transcript"] == {"text": "hola"}
     assert got["view_count"] == 5
+
+
+# --- enriquecimiento por defecto al extraer --------------------------------
+
+def test_download_record_carries_public_metrics(tmp_path):
+    """Si el registro de descarga pierde las métricas, el enrich deja de funcionar en silencio."""
+    from discovery import fetch
+
+    info = {
+        "id": "X", "webpage_url": "https://youtu.be/X", "title": "t", "duration": 30,
+        "channel": "c", "upload_date": "20260101",
+        "view_count": 100, "like_count": 7, "comment_count": 2,
+    }
+    rec = fetch._record(info, tmp_path)
+    assert (rec["view_count"], rec["like_count"], rec["comment_count"]) == (100, 7, 2)
+    assert rec["video_path"].endswith("X.mp4")
+
+
+def test_upsert_persists_core_and_stats_in_one_write(tmp_path):
+    """La vía única de escritura debe dejar metadata Y métricas públicas."""
+    from discovery import pipeline
+
+    con = store.connect(tmp_path / "p.db")
+    store.init(con)
+    pipeline._upsert(
+        con,
+        {"id": "A", "url": "u", "view_count": 10, "like_count": 3, "comment_count": 1,
+         "understanding": {"temas": ["x"]}},
+    )
+
+    got = store.get_ad(con, "A")
+    assert got["understanding"] == {"temas": ["x"]}
+    assert (got["view_count"], got["like_count"], got["comment_count"]) == (10, 3, 1)
+    assert got["stats_updated_at"] is not None
