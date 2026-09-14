@@ -329,6 +329,8 @@ def run(args: argparse.Namespace) -> int:
             return 1
     else:
         urls: List[str] = list(args.urls or [])
+        if args.urls_file:
+            urls += [ln.strip() for ln in Path(args.urls_file).read_text(encoding="utf-8").splitlines() if ln.strip()]
         if args.search:
             urls += fetch.search_urls(args.search, args.n)
         if args.channel:
@@ -364,6 +366,7 @@ def main() -> int:
     p = argparse.ArgumentParser(description="Descubrimiento y análisis de anuncios (Centauro).")
     src = p.add_argument_group("fuente")
     src.add_argument("--urls", nargs="*", help="URLs de YouTube")
+    src.add_argument("--urls-file", help="archivo con una URL por línea (para corpus grandes)")
     src.add_argument("--search", help="consulta de búsqueda en YouTube")
     src.add_argument("--channel", help="handle de canal, p.ej. @Telcel")
     src.add_argument("--n", type=int, default=8, help="nº de resultados de search/channel")
