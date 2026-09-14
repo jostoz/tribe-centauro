@@ -3,6 +3,12 @@
 **Fecha:** 2026-09-13 · **Corpus:** 15 anuncios Telcel (14 con perfil neural) · **Hardware:** RTX 4090
 **Datos:** `data/discovery/centauro.db` (reproducible con `python -m discovery.pipeline`)
 
+> ## ⚠️ Superado en parte por A2
+> Los contrastes de este informe estaban **infrapotenciados** (n=2 y n=3) y con el confusor
+> ritmo↔duración. [`GRUPO_A2_RESULTADOS.md`](GRUPO_A2_RESULTADOS.md) los repite con 29 anuncios
+> y control de duración: el contraste de **ritmo** pasa a ser robusto (DorsAttn +5.4 pp) y el
+> **voz/música queda descartado con medición**. Las limitaciones de método de aquí siguen vigentes.
+
 > Este informe es **exploratorio**. No hay test de significancia y los valores están en
 > **unidades crudas del modelo, sin calibrar**. Se reportan diferencias descriptivas, no
 > conclusiones.
@@ -112,9 +118,12 @@ sensorimotora. Es la única señal del lote con n razonable (4 vs 9) y direcció
 
 ## 5. Limitaciones detectadas (accionables)
 
-1. **`has_speech` no es fiable:** Whisper transcribió/alucinó texto en los 14 anuncios, incluidos
-   los musicales → el contraste voz/música no se pudo construir con ASR. Requiere un detector de
-   voz/música aparte (p. ej. VAD o clasificador de audio).
+1. **El contraste voz/música no existe en este corpus (medido, no supuesto).** Los 14 anuncios
+   produjeron texto, y al medirlo con `no_speech_prob` de Whisper (probabilidad del token
+   `<|nospeech|>` en el primer paso) **todos dan ≈ 0.000**: tienen locución. No es que Whisper
+   alucine sobre música — es que **no hay anuncios sin voz** en esta muestra (los spots de marca
+   casi siempre llevan VO). `discovery/transcribe.py` ya reporta `no_speech_prob` por anuncio,
+   así que el atributo queda medido y disponible, pero **no sirve como contraste aquí**.
 2. **`Vis` domina siempre:** hay que trabajar con perfiles normalizados, nunca con la red dominante.
 3. **Red `Limbic` ~3 %** del total → cualquier métrica sobre ella será de alta varianza.
 4. **Acentos en los campos del VLM** (`rápido` vs `rapido`): normalizar antes de agrupar.
@@ -127,5 +136,8 @@ sensorimotora. Es la única señal del lote con n razonable (4 vs 9) y direcció
 - **Controlar duración** dentro de cada grupo (o incluirla como covariable).
 - Priorizar el contraste **ritmo** (el que mostró señal) y el de **caras**, que es el más limpio
   conceptualmente.
-- Corregir el detector de voz antes de intentar voz/música.
+- **Descartar el contraste voz/música** en corpus de marca: medido `no_speech_prob ≈ 0` en
+  todos. Solo tendría sentido con fuentes sin locución (demos de producto, contenido local).
+- Correr A2 sobre los dos contrastes **con varianza real**: **ritmo** (el que mostró señal) y
+  **personajes/caras**, controlando la duración como covariable.
 - Reportar siempre el perfil normalizado de las 7 redes + `n`, nunca un "ganador".
