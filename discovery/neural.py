@@ -76,8 +76,13 @@ class NeuralAnalyzer:
             n += 1
         return n
 
-    def analyze(self, video_path: str | Path) -> Dict:
-        """Perfil por red funcional (unidades crudas) + red dominante."""
+    def analyze(self, video_path: str | Path, with_vertices: bool = False) -> Dict:
+        """Perfil por red funcional (unidades crudas) + red dominante.
+
+        Con ``with_vertices=True`` incluye ``vertex_mean_abs`` (20484,) — el **patrón completo**
+        por vértice en lugar de los 7 promedios de red. Es la lectura multivariada del modelo:
+        reducir a 7 shares tira el 99.99 % de la señal.
+        """
         if self._model is None:
             raise RuntimeError("llama a load() antes de analyze()")
         import pandas as pd
@@ -93,6 +98,8 @@ class NeuralAnalyzer:
         events = get_audio_and_text_events(pd.DataFrame([event]), audio_only=True)
         preds, _ = self._model.predict(events=events, verbose=False)
         out: Dict = {"shape": list(preds.shape)}
+        if with_vertices:
+            out["vertex_mean_abs"] = np.mean(np.abs(preds), axis=0)  # (20484,)
         if self._roi is not None:
             nets = {
                 net: round(float(np.mean(np.abs(ts))), 5)

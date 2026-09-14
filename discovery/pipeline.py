@@ -229,7 +229,7 @@ def phase_understand(
 # ---------------------------------------------------------------------------
 # Fase 3 — perfil neural (TRIBE residente)
 # ---------------------------------------------------------------------------
-def phase_neural(con, ads: List[dict], m: Metrics, use_cache: bool) -> None:
+def phase_neural(con, ads: List[dict], m: Metrics, use_cache: bool, save_vertices: bool = False) -> None:
     """Fase neural en DOS pasadas, con un solo load del modelo.
 
     A) **features**: codifica V-JEPA/audio de TODOS los anuncios (la parte cara,
@@ -278,8 +278,15 @@ def phase_neural(con, ads: List[dict], m: Metrics, use_cache: bool) -> None:
             _upsert(con, a)
             continue
         try:
-            a["neural"] = an.analyze(a["video_path"])
-            cache.put("neural", nkey, a["neural"])
+            res = an.analyze(a["video_path"], with_vertices=save_vertices)
+            if save_vertices and "vertex_mean_abs" in res:
+                import numpy as np
+
+                vdir = OUT / "vertices"
+                vdir.mkdir(parents=True, exist_ok=True)
+                np.save(vdir / f"{a['id']}.npy", res.pop("vertex_mean_abs").astype(np.float16))
+            a["neural"] = res
+            cache.put("neural", nkey, res)
             _upsert(con, a)
             m.add("neural", a["id"], time.time() - t0, False)
         except Exception as exc:  # noqa: BLE001 - un anuncio roto no debe tumbar la fase
@@ -354,8 +361,7 @@ def run(args: argparse.Namespace) -> int:
     if not args.no_understand:
         phase_understand(con, ads, args.qwen_model, args.frames, m, not args.no_cache, args.vlm_batch)
     if args.neural:
-        phase_neural(con, ads, m, not args.no_cache)
-
+        phase_neural(con, ads, m, not args.no_cache, args.vertices)
     build_and_export_graph(con, args.corpus)
     m.report()
     print(f"\ntotal: {time.time() - t_start:.1f}s")
@@ -382,6 +388,8 @@ def main() -> int:
     p.add_argument("--no-transcribe", action="store_true")
     p.add_argument("--no-understand", action="store_true")
     p.add_argument("--neural", action="store_true", help="perfil neural TRIBE (lento, opt-in)")
+    p.add_argument("--vertices", action="store_true",
+                   help="guardar también el patrón por vértice (20484) en data/discovery/vertices/*.npy")
     p.add_argument("--no-cache", action="store_true", help="ignora la caché y recalcula")
     p.add_argument("--no-stats", action="store_true", help="no refrescar métricas públicas")
     p.add_argument("--refresh-stats", action="store_true",
