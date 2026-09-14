@@ -35,9 +35,9 @@ def _plain(s) -> str:
     )
 
 
-def load_rows(con) -> list:
+def load_rows(con, corpus: str | None = None) -> list:
     rows = []
-    for a in store.all_ads(con):
+    for a in store.all_ads(con, corpus):
         neu = a.get("neural") or {}
         if not neu.get("networks"):
             continue
@@ -116,16 +116,17 @@ def main() -> int:
     ap.add_argument("--test", action="store_true", help="test formal de permutación + Holm")
     ap.add_argument("--n-perm", type=int, default=10000, help="permutaciones (def. 10000)")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--corpus", help="filtra por conjunto (p. ej. telcel, cocacola)")
     args = ap.parse_args()
 
     con = store.connect()
     store.init(con)
-    rows = load_rows(con)
+    rows = load_rows(con, args.corpus)
     if not rows:
         print("No hay anuncios con perfil neural. Corre el pipeline con --neural.")
         return 1
 
-    print(f"anuncios con perfil neural: {len(rows)}")
+    print(f"corpus: {args.corpus or '(todos)'} | anuncios con perfil neural: {len(rows)}")
     print("ritmo:", dict(Counter(r["ritmo"] for r in rows)))
     print("caras:", dict(Counter(r["caras"] for r in rows)))
 

@@ -23,7 +23,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -83,7 +83,7 @@ def _video_ok(a: dict) -> bool:
 # ---------------------------------------------------------------------------
 # Fase 0 — fetch (CPU/red, en paralelo)
 # ---------------------------------------------------------------------------
-def phase_fetch(con, urls: List[str], workers: int) -> List[dict]:
+def phase_fetch(con, urls: List[str], workers: int, corpus: Optional[str] = None) -> List[dict]:
     existing = {a["url"]: a for a in store.all_ads(con) if a.get("url")}
     to_download = [u for u in urls if not (u in existing and _video_ok(existing[u]))]
     skipped = len(urls) - len(to_download)
@@ -92,6 +92,8 @@ def phase_fetch(con, urls: List[str], workers: int) -> List[dict]:
     if to_download:
         print(f"[fetch] descargando {len(to_download)} en paralelo (workers={workers})...")
         for rec in fetch.download_many(to_download, workers=workers):
+            if corpus:
+                rec["corpus"] = corpus
             _upsert(con, rec)  # metadata + stats públicas (vienen en el propio download)
     ads = [a for a in store.all_ads(con) if a.get("url") in set(urls)]
     return [a for a in ads if _video_ok(a)]
@@ -286,8 +288,8 @@ def phase_neural(con, ads: List[dict], m: Metrics, use_cache: bool) -> None:
     print("      [neural] modelo descargado")
 
 
-def build_and_export_graph(con) -> dict:
-    records = store.all_ads(con)
+def build_and_export_graph(con, corpus: Optional[str] = None) -> dict:
+    records = store.all_ads(con, corpus)
     paths = graph.export(graph.build_graph(records), OUT / "graph")
     print(f"\n[graph] {len(records)} anuncios -> {paths['html']}")
     tops = store.top_entities(con, limit=8)
@@ -312,17 +314,17 @@ def run(args: argparse.Namespace) -> int:
     store.init(con)
 
     if args.graph_only:
-        build_and_export_graph(con)
+        build_and_export_graph(con, args.corpus)
         return 0
 
     if args.stats_only:
-        ads_all = [a for a in store.all_ads(con) if a.get("url")]
+        ads_all = [a for a in store.all_ads(con, args.corpus) if a.get("url")]
         phase_stats(con, ads_all, args.workers, args.refresh_stats, not args.no_cache)
         return 0
 
     if args.all:
-        ads = [a for a in store.all_ads(con) if _video_ok(a)]
-        print(f"[store] {len(ads)} anuncios con video disponible")
+        ads = [a for a in store.all_ads(con, args.corpus) if _video_ok(a)]
+        print(f"[store] {len(ads)} anuncios con video disponible" + (f" (corpus={args.corpus})" if args.corpus else ""))
         if not ads:
             return 1
     else:
@@ -334,7 +336,7 @@ def run(args: argparse.Namespace) -> int:
         if not urls:
             print("Nada que hacer. Usa --urls, --search, --channel o --all.")
             return 1
-        ads = phase_fetch(con, urls, args.workers)
+        ads = phase_fetch(con, urls, args.workers, args.corpus)
         print(f"[fetch] {len(ads)} anuncios con video disponible")
         if not ads:
             return 1
@@ -352,7 +354,7 @@ def run(args: argparse.Namespace) -> int:
     if args.neural:
         phase_neural(con, ads, m, not args.no_cache)
 
-    build_and_export_graph(con)
+    build_and_export_graph(con, args.corpus)
     m.report()
     print(f"\ntotal: {time.time() - t_start:.1f}s")
     return 0
@@ -383,6 +385,7 @@ def main() -> int:
                    help="forzar refresco de métricas públicas (ignora el TTL de 24 h)")
     p.add_argument("--stats-only", action="store_true",
                    help="solo refresca métricas públicas y sale (red, sin GPU)")
+    p.add_argument("--corpus", help="etiqueta del conjunto (p. ej. telcel, cocacola) para separar corpora")
     p.add_argument("--graph-only", action="store_true", help="reconstruye el grafo desde el store")
     p.add_argument("--cache-stats", action="store_true", help="muestra el tamaño de la caché")
     p.add_argument("--prune-cache", type=float, default=None, metavar="DÍAS",

@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS ads (
     like_count    INTEGER,
     comment_count INTEGER,
     stats_updated_at TEXT,
+    corpus        TEXT,
     video_path    TEXT,
     transcript    TEXT,
     understanding TEXT,
@@ -45,7 +46,7 @@ CREATE INDEX IF NOT EXISTS idx_entities_canonical ON entities(kind, canonical);
 
 _COLS = (
     "id", "source", "url", "title", "duration", "channel",
-    "upload_date", "view_count", "video_path",
+    "upload_date", "view_count", "video_path", "corpus",
 )
 
 # Columnas añadidas después de la primera versión: se migran con ALTER TABLE
@@ -54,7 +55,11 @@ _MIGRATIONS = {
     "like_count": "INTEGER",
     "comment_count": "INTEGER",
     "stats_updated_at": "TEXT",
+    "corpus": "TEXT",
 }
+
+# Backfill aplicado solo al crear la columna: los anuncios previos eran del corpus Telcel.
+_MIGRATION_BACKFILL = {"corpus": "telcel"}
 
 
 def connect(db_path: Path | str = DB_PATH) -> sqlite3.Connection:
@@ -71,6 +76,10 @@ def init(con: sqlite3.Connection) -> None:
     for col, typ in _MIGRATIONS.items():
         if col not in cols:
             con.execute(f"ALTER TABLE ads ADD COLUMN {col} {typ}")
+            if col in _MIGRATION_BACKFILL:
+                con.execute(
+                    f"UPDATE ads SET {col}=? WHERE {col} IS NULL", (_MIGRATION_BACKFILL[col],)
+                )
     con.commit()
 
 
@@ -95,6 +104,7 @@ def upsert_ad(con: sqlite3.Connection, rec: dict, entities: Optional[Iterable[Tu
             transcript=COALESCE(excluded.transcript, ads.transcript),
             understanding=COALESCE(excluded.understanding, ads.understanding),
             neural=COALESCE(excluded.neural, ads.neural),
+            corpus=COALESCE(excluded.corpus, ads.corpus),
             updated_at=datetime('now')
         """,
         list(row.values()),
@@ -144,7 +154,7 @@ def upsert_stats(con: sqlite3.Connection, rec: dict) -> None:
     con.commit()
 
 
-def stats_table(con: sqlite3.Connection, now=None) -> List[dict]:
+def stats_table(con: sqlite3.Connection, now=None, corpus: Optional[str] = None) -> List[dict]:
     """Métricas públicas con derivadas: vistas/día, tasa de likes y de comentarios.
 
     ``now`` es inyectable para poder testear el cálculo sin depender del reloj.
@@ -153,7 +163,7 @@ def stats_table(con: sqlite3.Connection, now=None) -> List[dict]:
 
     now = now or datetime.now(timezone.utc)
     out: List[dict] = []
-    for a in all_ads(con):
+    for a in all_ads(con, corpus):
         views, likes, comments = a.get("view_count"), a.get("like_count"), a.get("comment_count")
         days = None
         ud = a.get("upload_date")
@@ -186,8 +196,13 @@ def get_ad(con: sqlite3.Connection, ad_id: str) -> Optional[dict]:
     return _row_to_dict(row) if row else None
 
 
-def all_ads(con: sqlite3.Connection) -> List[dict]:
-    return [_row_to_dict(r) for r in con.execute("SELECT * FROM ads ORDER BY id")]
+def all_ads(con: sqlite3.Connection, corpus: Optional[str] = None) -> List[dict]:
+    """Anuncios del store; ``corpus`` filtra por conjunto (p. ej. "telcel", "cocacola")."""
+    if corpus:
+        rows = con.execute("SELECT * FROM ads WHERE corpus=? ORDER BY id", (corpus,))
+    else:
+        rows = con.execute("SELECT * FROM ads ORDER BY id")
+    return [_row_to_dict(r) for r in rows]
 
 
 def top_entities(con: sqlite3.Connection, kind: Optional[str] = None, limit: int = 20) -> List[Tuple[str, int]]:

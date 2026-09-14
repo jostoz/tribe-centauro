@@ -200,3 +200,31 @@ def test_upsert_persists_core_and_stats_in_one_write(tmp_path):
     assert got["understanding"] == {"temas": ["x"]}
     assert (got["view_count"], got["like_count"], got["comment_count"]) == (10, 3, 1)
     assert got["stats_updated_at"] is not None
+
+
+# --- separación de corpora ---------------------------------------------------
+
+def test_store_migrates_and_backfills_corpus(tmp_path):
+    """Un store previo debe ganar `corpus` y sus anuncios quedar marcados como telcel."""
+    import sqlite3
+
+    con = sqlite3.connect(tmp_path / "old.db")
+    con.execute("CREATE TABLE ads (id TEXT PRIMARY KEY, url TEXT)")
+    con.execute("INSERT INTO ads (id, url) VALUES ('A', 'u')")
+    con.commit()
+
+    store.init(con)
+
+    assert "corpus" in {r[1] for r in con.execute("PRAGMA table_info(ads)")}
+    assert con.execute("SELECT corpus FROM ads WHERE id='A'").fetchone()[0] == "telcel"
+
+
+def test_all_ads_filters_by_corpus(tmp_path):
+    con = store.connect(tmp_path / "s.db")
+    store.init(con)
+    store.upsert_ad(con, {"id": "T1", "url": "u", "corpus": "telcel"})
+    store.upsert_ad(con, {"id": "C1", "url": "u", "corpus": "cocacola"})
+
+    assert [a["id"] for a in store.all_ads(con, "telcel")] == ["T1"]
+    assert [a["id"] for a in store.all_ads(con, "cocacola")] == ["C1"]
+    assert len(store.all_ads(con)) == 2
