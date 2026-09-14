@@ -24,6 +24,9 @@ CREATE TABLE IF NOT EXISTS ads (
     channel       TEXT,
     upload_date   TEXT,
     view_count    INTEGER,
+    like_count    INTEGER,
+    comment_count INTEGER,
+    stats_updated_at TEXT,
     video_path    TEXT,
     transcript    TEXT,
     understanding TEXT,
@@ -45,6 +48,14 @@ _COLS = (
     "upload_date", "view_count", "video_path",
 )
 
+# Columnas añadidas después de la primera versión: se migran con ALTER TABLE
+# (CREATE TABLE IF NOT EXISTS no las añadiría a una tabla ya existente).
+_MIGRATIONS = {
+    "like_count": "INTEGER",
+    "comment_count": "INTEGER",
+    "stats_updated_at": "TEXT",
+}
+
 
 def connect(db_path: Path | str = DB_PATH) -> sqlite3.Connection:
     p = Path(db_path)
@@ -56,6 +67,10 @@ def connect(db_path: Path | str = DB_PATH) -> sqlite3.Connection:
 
 def init(con: sqlite3.Connection) -> None:
     con.executescript(_SCHEMA)
+    cols = {r[1] for r in con.execute("PRAGMA table_info(ads)")}
+    for col, typ in _MIGRATIONS.items():
+        if col not in cols:
+            con.execute(f"ALTER TABLE ads ADD COLUMN {col} {typ}")
     con.commit()
 
 
@@ -99,6 +114,70 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
         if d.get(jf):
             d[jf] = json.loads(d[jf])
     return d
+
+
+def upsert_stats(con: sqlite3.Connection, rec: dict) -> None:
+    """Actualiza las métricas públicas (vistas/likes/comments) sin tocar el resto.
+
+    Se guardan **crudas** (con ``stats_updated_at``); las derivadas (vistas/día, tasas)
+    se calculan al leer con :func:`stats_table`, porque dependen de la fecha de consulta.
+    """
+    con.execute(
+        """
+        UPDATE ads SET
+            view_count=COALESCE(?, view_count),
+            like_count=COALESCE(?, like_count),
+            comment_count=COALESCE(?, comment_count),
+            upload_date=COALESCE(?, upload_date),
+            duration=COALESCE(?, duration),
+            channel=COALESCE(?, channel),
+            title=COALESCE(?, title),
+            stats_updated_at=datetime('now')
+        WHERE id=?
+        """,
+        (
+            rec.get("view_count"), rec.get("like_count"), rec.get("comment_count"),
+            rec.get("upload_date"), rec.get("duration"), rec.get("channel"),
+            rec.get("title"), rec["id"],
+        ),
+    )
+    con.commit()
+
+
+def stats_table(con: sqlite3.Connection, now=None) -> List[dict]:
+    """Métricas públicas con derivadas: vistas/día, tasa de likes y de comentarios.
+
+    ``now`` es inyectable para poder testear el cálculo sin depender del reloj.
+    """
+    from datetime import datetime, timezone
+
+    now = now or datetime.now(timezone.utc)
+    out: List[dict] = []
+    for a in all_ads(con):
+        views, likes, comments = a.get("view_count"), a.get("like_count"), a.get("comment_count")
+        days = None
+        ud = a.get("upload_date")
+        if ud:
+            try:
+                up = datetime.strptime(ud, "%Y%m%d").replace(tzinfo=timezone.utc)
+                days = max((now - up).days, 1)
+            except ValueError:
+                days = None
+        out.append(
+            {
+                "id": a["id"],
+                "channel": a.get("channel"),
+                "views": views,
+                "likes": likes,
+                "comments": comments,
+                "days": days,
+                "views_per_day": (views / days) if (views and days) else None,
+                "like_rate": (likes / views) if (likes and views) else None,
+                "comment_rate": (comments / views) if (comments and views) else None,
+                "stats_updated_at": a.get("stats_updated_at"),
+            }
+        )
+    return out
 
 
 def get_ad(con: sqlite3.Connection, ad_id: str) -> Optional[dict]:

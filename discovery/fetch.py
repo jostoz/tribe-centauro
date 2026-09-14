@@ -52,8 +52,50 @@ def _record(info: dict, outdir: Path) -> dict:
         "channel": info.get("channel") or info.get("uploader"),
         "upload_date": info.get("upload_date"),
         "view_count": info.get("view_count"),
+        "like_count": info.get("like_count"),
+        "comment_count": info.get("comment_count"),
         "video_path": str(outdir / f"{info['id']}.mp4"),
     }
+
+
+def fetch_stats(urls: Iterable[str], workers: int = 4) -> List[dict]:
+    """Métricas **públicas** de YouTube (vistas, likes, comentarios) sin descargar el video.
+
+    Son un proxy débil de resultado: mezclan pauta pagada con orgánico y, en re-subidas de
+    terceros, no son métricas de la marca. Sirven para ordenar dentro de un mismo canal,
+    no para calibrar contra resultados de campaña.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "ignoreerrors": True,
+    }
+
+    def one(url: str):
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+        if not info:
+            return None
+        return {
+            "id": info["id"],
+            "url": info.get("webpage_url") or url,
+            "title": info.get("title"),
+            "duration": info.get("duration"),
+            "channel": info.get("channel") or info.get("uploader"),
+            "upload_date": info.get("upload_date"),
+            "view_count": info.get("view_count"),
+            "like_count": info.get("like_count"),
+            "comment_count": info.get("comment_count"),
+        }
+
+    urls = list(urls)
+    if not urls:
+        return []
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        return [r for r in pool.map(one, urls) if r]
 
 
 def download(urls: Iterable[str], outdir: Path | str = DEFAULT_OUT) -> List[dict]:

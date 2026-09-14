@@ -85,8 +85,53 @@ def phase_fetch(con, urls: List[str], workers: int) -> List[dict]:
         print(f"[fetch] descargando {len(to_download)} en paralelo (workers={workers})...")
         for rec in fetch.download_many(to_download, workers=workers):
             _upsert(con, rec)
+            if rec.get("view_count") is not None:
+                store.upsert_stats(con, rec)  # el propio download ya trae vistas/likes
     ads = [a for a in store.all_ads(con) if a.get("url") in set(urls)]
     return [a for a in ads if _video_ok(a)]
+
+
+# ---------------------------------------------------------------------------
+# Fase 0b — métricas públicas (red, sin GPU)
+# ---------------------------------------------------------------------------
+STATS_TTL_HOURS = 24.0
+
+
+def phase_stats(con, ads: List[dict], workers: int, force: bool, use_cache: bool) -> None:
+    """Refresca vistas/likes/comentarios públicos de los anuncios.
+
+    Es red-only y barato (no toca la GPU). Se refresca si ``stats_updated_at`` supera el
+    TTL, si no hay dato, o si se fuerza con ``--refresh-stats``. Las derivadas
+    (vistas/día, tasas) se calculan al leer con ``store.stats_table()``.
+    """
+    from datetime import datetime, timezone
+
+    todo = []
+    for a in ads:
+        if not a.get("url"):
+            continue
+        if force or not use_cache:
+            todo.append(a)
+            continue
+        age = None
+        if a.get("stats_updated_at"):
+            try:
+                ts = datetime.fromisoformat(a["stats_updated_at"])
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+                age = (datetime.now(timezone.utc) - ts).total_seconds() / 3600
+            except ValueError:
+                age = None
+        if age is None or age >= STATS_TTL_HOURS:
+            todo.append(a)
+    if not todo:
+        print(f"[stats] al día ({len(ads)} anuncios, TTL {STATS_TTL_HOURS:.0f} h)")
+        return
+    print(f"[stats] refrescando métricas públicas de {len(todo)}...")
+    recs = fetch.fetch_stats([a["url"] for a in todo], workers=workers)
+    for r in recs:
+        store.upsert_stats(con, r)
+    print(f"[stats] {len(recs)} actualizados")
 
 
 # ---------------------------------------------------------------------------
@@ -102,7 +147,7 @@ def phase_transcribe(con, ads: List[dict], model: str, language: str, m: Metrics
 
     for a in pend:
         t0 = time.time()
-        key = cache.content_key(a["video_path"], "transcribe", f"{model}|lang={language}")
+        key = cache.content_key(a["video_path"], "transcribe", f"{model}|lang={language}|v2-nospeech")
         cached = None if not use_cache else cache.get("transcribe", key)
         if cached is not None:
             a["transcript"] = cached
@@ -264,21 +309,35 @@ def run(args: argparse.Namespace) -> int:
         build_and_export_graph(con)
         return 0
 
-    urls: List[str] = list(args.urls or [])
-    if args.search:
-        urls += fetch.search_urls(args.search, args.n)
-    if args.channel:
-        urls += fetch.channel_urls(args.channel, args.n)
-    if not urls:
-        print("Nada que hacer. Usa --urls, --search o --channel.")
-        return 1
+    if args.stats_only:
+        ads_all = [a for a in store.all_ads(con) if a.get("url")]
+        phase_stats(con, ads_all, args.workers, args.refresh_stats, not args.no_cache)
+        return 0
+
+    if args.all:
+        ads = [a for a in store.all_ads(con) if _video_ok(a)]
+        print(f"[store] {len(ads)} anuncios con video disponible")
+        if not ads:
+            return 1
+    else:
+        urls: List[str] = list(args.urls or [])
+        if args.search:
+            urls += fetch.search_urls(args.search, args.n)
+        if args.channel:
+            urls += fetch.channel_urls(args.channel, args.n)
+        if not urls:
+            print("Nada que hacer. Usa --urls, --search, --channel o --all.")
+            return 1
+        ads = phase_fetch(con, urls, args.workers)
+        print(f"[fetch] {len(ads)} anuncios con video disponible")
+        if not ads:
+            return 1
 
     m = Metrics()
     t_start = time.time()
-    ads = phase_fetch(con, urls, args.workers)
-    print(f"[fetch] {len(ads)} anuncios con video disponible")
-    if not ads:
-        return 1
+
+    if not args.no_stats:
+        phase_stats(con, ads, args.workers, args.refresh_stats, not args.no_cache)
 
     if not args.no_transcribe:
         phase_transcribe(con, ads, args.whisper_model, args.language, m, not args.no_cache)
@@ -300,6 +359,8 @@ def main() -> int:
     src.add_argument("--search", help="consulta de búsqueda en YouTube")
     src.add_argument("--channel", help="handle de canal, p.ej. @Telcel")
     src.add_argument("--n", type=int, default=8, help="nº de resultados de search/channel")
+    p.add_argument("--all", action="store_true",
+                   help="procesa TODOS los anuncios ya presentes en el store (sin URLs)")
     p.add_argument("--workers", type=int, default=4, help="descargas en paralelo")
     p.add_argument("--frames", type=int, default=12, help="frames por anuncio para el VLM")
     p.add_argument("--vlm-batch", type=int, default=2,
@@ -311,6 +372,11 @@ def main() -> int:
     p.add_argument("--no-understand", action="store_true")
     p.add_argument("--neural", action="store_true", help="perfil neural TRIBE (lento, opt-in)")
     p.add_argument("--no-cache", action="store_true", help="ignora la caché y recalcula")
+    p.add_argument("--no-stats", action="store_true", help="no refrescar métricas públicas")
+    p.add_argument("--refresh-stats", action="store_true",
+                   help="forzar refresco de métricas públicas (ignora el TTL de 24 h)")
+    p.add_argument("--stats-only", action="store_true",
+                   help="solo refresca métricas públicas y sale (red, sin GPU)")
     p.add_argument("--graph-only", action="store_true", help="reconstruye el grafo desde el store")
     p.add_argument("--cache-stats", action="store_true", help="muestra el tamaño de la caché")
     p.add_argument("--prune-cache", type=float, default=None, metavar="DÍAS",

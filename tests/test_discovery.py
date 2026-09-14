@@ -121,3 +121,48 @@ def test_looks_degenerate_flags_loops_and_bad_json():
     assert not understand.looks_degenerate(
         {"objetos": ["globo"], "temas": ["viaje"], "marca_elementos": ["Telcel", "logo"]}
     )
+
+
+# --- métricas públicas (vistas/likes/comentarios) ----------------------------
+
+def test_store_migrates_stats_columns(tmp_path):
+    """Un store creado con el esquema viejo debe ganar las columnas de stats."""
+    import sqlite3
+
+    con = sqlite3.connect(tmp_path / "old.db")
+    con.execute("CREATE TABLE ads (id TEXT PRIMARY KEY, url TEXT)")
+    con.commit()
+
+    store.init(con)
+    cols = {r[1] for r in con.execute("PRAGMA table_info(ads)")}
+    assert {"like_count", "comment_count", "stats_updated_at"} <= cols
+
+
+def test_stats_table_derives_rates_from_raw_counts(tmp_path):
+    from datetime import datetime, timezone
+
+    con = store.connect(tmp_path / "s.db")
+    store.init(con)
+    store.upsert_ad(con, {"id": "A", "url": "u"})
+    store.upsert_stats(
+        con,
+        {"id": "A", "view_count": 1000, "like_count": 50, "comment_count": 10,
+         "upload_date": "20260901"},
+    )
+
+    row = store.stats_table(con, now=datetime(2026, 9, 11, tzinfo=timezone.utc))[0]
+    assert row["days"] == 10
+    assert row["views_per_day"] == 100.0
+    assert row["like_rate"] == 0.05
+    assert row["comment_rate"] == 0.01
+
+
+def test_upsert_stats_does_not_wipe_core_fields(tmp_path):
+    con = store.connect(tmp_path / "s.db")
+    store.init(con)
+    store.upsert_ad(con, {"id": "A", "url": "u", "transcript": {"text": "hola"}})
+
+    store.upsert_stats(con, {"id": "A", "view_count": 5})
+    got = store.get_ad(con, "A")
+    assert got["transcript"] == {"text": "hola"}
+    assert got["view_count"] == 5

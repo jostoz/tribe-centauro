@@ -130,6 +130,33 @@ fallback es un forward extra, que es lo que separa x2.6 de x1.6.
 > alternar encode→forward→encode) y después **todos** los forwards, que con las features
 > cacheadas cuestan ~1 s/anuncio y son repetibles sin re-codificar.
 
+## Métricas públicas (proxy de resultado, sin depender del cliente)
+
+El pipeline captura **vistas, likes y comentarios públicos** de YouTube sin descargar el
+vídeo y los persiste en el store (columna `stats_updated_at`, TTL **24 h**).
+
+```bash
+# Solo métricas públicas (red, sin GPU)
+.venv/Scripts/python.exe -m discovery.pipeline --stats-only
+.venv/Scripts/python.exe -m discovery.pipeline --stats-only --refresh-stats   # ignora el TTL
+.venv/Scripts/python.exe -m discovery.pipeline --all --no-stats               # saltarlas
+```
+
+Se guardan **crudas**; las derivadas se calculan al leer con `store.stats_table()`:
+`views_per_day`, `like_rate`, `comment_rate`.
+
+### Por qué NO sirve para calibrar (medido en el corpus Telcel, 30 anuncios)
+
+| observación | dato real | consecuencia |
+|---|---|---|
+| Las vistas las domina la **inversión en pauta** | 53.0M y 47.7M vistas/día 424K y 382K en dos anuncios; el resto 0–791 | sin saber el spend, no es comparable |
+| Los **likes están ocultos o ausentes** en parte del corpus | un anuncio devuelve `None`; los dos virales dan 0,001 % | `like_rate` no es fiable |
+| Hay **re-subidas de terceros** | canal ≠ marca en 11/30 | no son métricas de la marca |
+
+**Conclusión honesta:** sirven para ordenar **dentro de un mismo canal** y para detectar
+casos extremos; **no** calibran contra resultados de campaña. Para eso hace falta ranking del
+cliente o verdad comprada (test de pauta propio).
+
 ## Convención temporal (cerrada en Fase 0.5)
 
 `preds[k]` es la respuesta al **segundo `k`** del anuncio
