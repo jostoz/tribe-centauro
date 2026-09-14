@@ -58,15 +58,41 @@ def unload() -> None:
     free_gpu()
 
 
+def _no_speech_prob(pipe, audio: np.ndarray) -> float:
+    """Probabilidad de "sin voz" según Whisper (token <|nospeech|> del 1er paso).
+
+    Es el mecanismo estándar de Whisper para esto y reutiliza el modelo ya cargado:
+    evita depender de un VAD externo (silero-vad falla en este Windows por DLL).
+    """
+    import torch
+
+    feats = pipe.feature_extractor(
+        audio, sampling_rate=16000, return_tensors="pt"
+    ).input_features
+    dtype = next(pipe.model.parameters()).dtype
+    feats = feats.to(pipe.device, dtype=dtype)
+    with torch.inference_mode():
+        out = pipe.model.generate(
+            feats, return_dict_in_generate=True, output_scores=True, max_new_tokens=4
+        )
+    probs = torch.softmax(out.scores[0][0].float(), dim=-1)
+    nid = pipe.tokenizer.convert_tokens_to_ids("<|nospeech|>")
+    return float(probs[nid])
+
+
 def transcribe(
     video_path: str | Path,
     model: str = "openai/whisper-small",
     language: Optional[str] = "spanish",
 ) -> dict:
-    """Devuelve ``{"text": str, "segments": [{start, end, text}], "has_speech": bool}``."""
+    """Devuelve ``{"text", "segments", "has_speech", "no_speech_prob"}``.
+
+    ``has_speech`` se decide por ``no_speech_prob`` de Whisper, **no** por si hay texto:
+    Whisper transcribe/alucina texto sobre música, así que "hay texto" no implica "hay voz".
+    """
     audio = extract_audio(video_path)
     if audio.size == 0 or float(np.max(np.abs(audio))) < 1e-3:
-        return {"text": "", "segments": [], "has_speech": False}
+        return {"text": "", "segments": [], "has_speech": False, "no_speech_prob": 1.0}
     pipe = _pipe(model)
     gen_kwargs = {"task": "transcribe"}
     if language:
@@ -87,4 +113,10 @@ def transcribe(
         for c in out.get("chunks", [])
     ]
     text = out["text"].strip()
-    return {"text": text, "segments": segments, "has_speech": bool(text)}
+    p = _no_speech_prob(pipe, audio)
+    return {
+        "text": text,
+        "segments": segments,
+        "has_speech": bool(p < 0.5),
+        "no_speech_prob": round(p, 4),
+    }
