@@ -109,10 +109,12 @@ curl -X POST http://127.0.0.1:8000/api/ads/analyze \
 python -m pytest tests/ -q
 ```
 
-66 tests (65 pasan; 1 se salta si el `config.yaml` del checkpoint ya está normalizado). Cubren:
+71 tests (70 pasan; 1 se salta si el `config.yaml` del checkpoint ya está normalizado). Cubren:
 máscaras de ROI contra el atlas real, contrato de fuentes del modelo (con un doble, sin
-GPU), contrato de la convención de alineación temporal, serialización JSON-safe, y una
-demostración del falso positivo del t-test aplanado frente a la permutación por bloques.
+GPU), contrato de la convención de alineación temporal, serialización JSON-safe, el manejo de
+las cookies de YouTube (una copia por hilo: yt-dlp reescribe el archivo al cerrar cada
+`YoutubeDL`) y una demostración del falso positivo del t-test aplanado frente a la permutación
+por bloques.
 
 ## Convenciones del modelo (verificadas)
 

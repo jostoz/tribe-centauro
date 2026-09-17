@@ -228,3 +228,51 @@ def test_all_ads_filters_by_corpus(tmp_path):
     assert [a["id"] for a in store.all_ads(con, "telcel")] == ["T1"]
     assert [a["id"] for a in store.all_ads(con, "cocacola")] == ["C1"]
     assert len(store.all_ads(con)) == 2
+
+
+# --- cookies de YouTube ------------------------------------------------------
+
+def _cookie_file(p, vacio: bool = False):
+    """Archivo Netscape mínimo (7 campos por línea, como exige el formato)."""
+    p.write_text(
+        "# Netscape HTTP Cookie File\n"
+        + ("" if vacio else ".youtube.com\tTRUE\t/\tFALSE\t1789396091\tPREF\t1\n"),
+        encoding="utf-8",
+    )
+    return p
+
+
+def test_cookies_incompletos_se_ignoran(tmp_path, monkeypatch):
+    """Un archivo a medias hacía caer la corrida entera con CookieLoadError."""
+    from discovery import fetch
+
+    monkeypatch.setenv("CENTAURO_COOKIES", str(_cookie_file(tmp_path / "c.txt", vacio=True)))
+    assert fetch._cookies_opt() == {}
+
+
+def test_cada_hilo_lee_su_propia_copia_de_cookies(tmp_path, monkeypatch):
+    """yt-dlp reescribe el cookiefile al cerrar cada YoutubeDL; compartido entre hilos del pool,
+    uno lo trunca mientras otro lo lee y la corrida se cae."""
+    import threading
+    from pathlib import Path
+
+    from discovery import fetch
+
+    cookies = _cookie_file(tmp_path / "cookies.txt")
+    monkeypatch.setenv("CENTAURO_COOKIES", str(cookies))
+
+    rutas, barrera = {}, threading.Barrier(2)
+
+    def trabajo(n):
+        barrera.wait()
+        rutas[n] = fetch._cookies_opt()["cookiefile"]
+
+    hilos = [threading.Thread(target=trabajo, args=(n,)) for n in (1, 2)]
+    for h in hilos:
+        h.start()
+    for h in hilos:
+        h.join()
+
+    assert len(set(rutas.values())) == 2, "una copia por hilo"
+    assert str(cookies) not in rutas.values(), "el archivo del usuario no se le pasa a yt-dlp"
+    assert all(Path(r).read_bytes() == cookies.read_bytes() for r in rutas.values())

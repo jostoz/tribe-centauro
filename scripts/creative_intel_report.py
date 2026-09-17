@@ -180,7 +180,16 @@ def seccion_e(a: dict, d: dict) -> dict:
 def main() -> int:
     con = store.connect()
     store.init(con)
-    corpus = ["telcel", "cocacola"]
+    # Corpus del informe: los dos propios + las 21 marcas del manifiesto multi-marca
+    # (data/brands/), descargadas y analizadas con VLM en el store. El benchmark LAMBDA
+    # entra por D/D2, no por aquí.
+    corpus = [
+        "telcel", "cocacola",
+        "at_t_mexico", "movistar_mexico", "pepsi_mexico", "jarritos", "corona", "tecate",
+        "sabritas", "bimbo", "marinela", "mcdonald_s_mexico", "walmart_mexico", "liverpool",
+        "elektra", "oxxo", "bbva_mexico", "banorte", "santander_mexico", "nissan_mexico",
+        "kia_mexico", "samsung_mexico", "xiaomi_mexico",
+    ]
 
     a = seccion_a(con, corpus)
     b = seccion_b(con, corpus)

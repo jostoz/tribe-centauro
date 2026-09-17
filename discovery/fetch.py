@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import tempfile
+import threading
 from pathlib import Path
 from typing import Iterable, List
 
@@ -20,15 +22,56 @@ THROTTLE = {"sleep_interval": 1, "max_sleep_interval": 4, "retries": 3}
 # Si existe, se usa para autenticar (YouTube bloquea con "Sign in to confirm you're not a bot"
 # tras muchas peticiones). Exportar con una extensión tipo "Get cookies.txt LOCALLY".
 COOKIES_FILE = Path("data/cookies.txt")
+COOKIES_MAGIC = "# Netscape HTTP Cookie File"
+_COOKIES_TLS = threading.local()  # copia de cookies propia de cada hilo
+_COOKIES_WARNED: set = set()  # avisos ya impresos (no repetirlos por URL)
 COOKIES_HINT = (
     "YouTube pidió autenticación (anti-bot). Exporta las cookies del navegador a "
     "data/cookies.txt (extensión 'Get cookies.txt LOCALLY') y reintenta."
 )
 
 
+def _cookies_are_complete(raw: bytes) -> bool:
+    """¿El archivo Netscape está entero? Vale la pena mirarlo: yt-dlp lo **reescribe** al cerrar
+    cada ``YoutubeDL`` (``close()`` → ``save_cookies()``) sin atomicidad, así que un lector
+    concurrente puede encontrarlo a medias y abortar con ``CookieLoadError``."""
+    try:
+        lineas = raw.decode("utf-8").splitlines()
+    except UnicodeDecodeError:
+        return False
+    if not lineas or not lineas[0].startswith(COOKIES_MAGIC):
+        return False
+    filas = [l.split("\t") for l in lineas if l.strip() and not l.startswith(("#", "$"))]
+    return bool(filas) and all(len(f) == 7 for f in filas)
+
+
 def _cookies_opt() -> dict:
-    env = Path(__import__("os").environ.get("CENTAURO_COOKIES", COOKIES_FILE))
-    return {"cookiefile": str(env)} if env.is_file() else {}
+    """Cookies para **este hilo**, sobre una copia privada.
+
+    ``yt_dlp.YoutubeDL.close()`` llama a ``save_cookies()``, que reescribe el archivo de cookies
+    (``open(file, 'w')``: trunca y luego escribe). Si los hilos del pool comparten el archivo,
+    uno lo trunca mientras otro lo lee → ``CookieLoadError`` y la corrida se cae entera (visto
+    en vivo, dos veces, a mitad de la ingesta). Cada hilo trabaja sobre su propia copia y el
+    archivo del usuario no se toca.
+    """
+    env = Path(os.environ.get("CENTAURO_COOKIES", COOKIES_FILE))
+    try:
+        raw = env.read_bytes() if env.is_file() else b""
+    except OSError:
+        raw = b""
+    if not raw:
+        return {}
+    if not _cookies_are_complete(raw):
+        if str(env) not in _COOKIES_WARNED:
+            _COOKIES_WARNED.add(str(env))
+            print(f"aviso: {env} no es un archivo de cookies Netscape completo; se ignora.")
+        return {}
+    if getattr(_COOKIES_TLS, "raw", None) != raw:
+        copia = Path(tempfile.gettempdir()) / f"centauro-cookies.{threading.get_ident()}.txt"
+        copia.write_bytes(raw)
+        _COOKIES_TLS.raw = raw
+        _COOKIES_TLS.path = copia
+    return {"cookiefile": str(_COOKIES_TLS.path)}
 
 
 def _ensure_ffmpeg_dir() -> str:
@@ -36,7 +79,7 @@ def _ensure_ffmpeg_dir() -> str:
     otro nombre. Lo copiamos una vez a un dir estable con el nombre esperado."""
     dst_dir = Path(tempfile.gettempdir()) / "centauro_ffmpeg"
     dst_dir.mkdir(parents=True, exist_ok=True)
-    dst = dst_dir / ("ffmpeg.exe" if __import__("os").name == "nt" else "ffmpeg")
+    dst = dst_dir / ("ffmpeg.exe" if os.name == "nt" else "ffmpeg")
     if not dst.exists():
         try:
             shutil.copy2(imageio_ffmpeg.get_ffmpeg_exe(), dst)
@@ -93,11 +136,11 @@ def fetch_stats(urls: Iterable[str], workers: int = 4) -> List[dict]:
         "skip_download": True,
         "ignoreerrors": True,
         **THROTTLE,
-        **_cookies_opt(),
     }
 
     def one(url: str):
-        with yt_dlp.YoutubeDL(opts) as ydl:
+        # Las cookies van por hilo: yt-dlp reescribe el archivo al cerrar cada YoutubeDL.
+        with yt_dlp.YoutubeDL({**opts, **_cookies_opt()}) as ydl:
             info = ydl.extract_info(url, download=False)
         if not info:
             return None
